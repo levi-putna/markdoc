@@ -1,0 +1,80 @@
+#!/bin/bash
+# MarkDoc CLI helper — opens Markdown files in MarkDoc (FR-6.x)
+
+set -e
+
+MARKDOC_APP="/Applications/MarkDoc.app/Contents/MacOS/MarkDoc"
+SUPPORTED_EXTENSIONS="md markdown mdown mkd"
+NEW_WINDOW=false
+FILES=()
+
+usage() {
+  echo "Usage: markdoc [--new-window] [file ...]"
+  exit 1
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --new-window)
+      NEW_WINDOW=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      FILES+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# Resolve MarkDoc binary
+if [ ! -f "$MARKDOC_APP" ]; then
+  # Development fallback
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  DEV_BINARY="$SCRIPT_DIR/../node_modules/.bin/electron"
+  if [ -f "$DEV_BINARY" ]; then
+    MARKDOC_APP="$DEV_BINARY"
+    MARKDOC_SCRIPT="$SCRIPT_DIR/../out/main/index.js"
+  else
+    echo "Error: MarkDoc is not installed at $MARKDOC_APP" >&2
+    exit 1
+  fi
+fi
+
+# Validate file extensions
+for file in "${FILES[@]}"; do
+  if [ ! -e "$file" ]; then
+    echo "Error: File not found: $file" >&2
+    exit 1
+  fi
+  ext="${file##*.}"
+  ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+  if ! echo "$SUPPORTED_EXTENSIONS" | grep -qw "$ext_lower"; then
+    echo "Error: Unsupported file extension: .$ext (supported: $SUPPORTED_EXTENSIONS)" >&2
+    exit 1
+  fi
+  # Resolve to absolute path
+  FILES[${#FILES[@]}]=$(cd "$(dirname "$file")" && pwd)/$(basename "$file")
+done
+
+# Build launch command
+ARGS=()
+if [ "$NEW_WINDOW" = true ]; then
+  ARGS+=("--new-window")
+fi
+for file in "${FILES[@]}"; do
+  ARGS+=("$file")
+done
+
+if [ -n "$MARKDOC_SCRIPT" ]; then
+  exec "$MARKDOC_APP" "$MARKDOC_SCRIPT" "${ARGS[@]}"
+else
+  exec "$MARKDOC_APP" "${ARGS[@]}"
+fi
