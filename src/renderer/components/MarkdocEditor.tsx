@@ -16,7 +16,10 @@ interface MarkdocEditorProps {
   content: string
   onContentChange?: ({ markdown, html }: { markdown: string; html: string }) => void
   onEditorReady?: ({ editor }: { editor: Editor }) => void
-  scrollToPos?: number | null
+  // `nonce` changes on every jump request, even to the same heading twice in
+  // a row, so the scroll effect always re-fires without needing a "reset to
+  // null" that would race with its own multi-frame scroll convergence below.
+  scrollToPos?: { pos: number; nonce: number } | null
 }
 
 /**
@@ -40,6 +43,7 @@ export function MarkdocEditor({
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLocalUpdate = useRef(false)
+  const rafRef = useRef<number | null>(null)
 
   const editor = useEditor({
     extensions: createTiptapExtensions({
@@ -106,11 +110,65 @@ export function MarkdocEditor({
 
   useEffect(() => {
     if (!editor || scrollToPos == null) return
-    editor.commands.focus()
-    editor.commands.setTextSelection(scrollToPos)
-    const dom = editor.view.domAtPos(scrollToPos)
-    const element = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement
-    element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const targetPos = scrollToPos.pos
+
+    // Move the cursor to the heading, but focus the DOM directly with
+    // `preventScroll` rather than via `editor.commands.focus()`. That command
+    // defers the native `.focus()` call to the next animation frame, and
+    // outside Safari (i.e. on Chromium/Electron) lets the browser's default
+    // caret-follows-focus auto-scroll run a frame after ours — which can
+    // hijack our in-progress smooth scroll below and land on an inconsistent
+    // position. Focusing synchronously with `preventScroll: true` means this
+    // jump behaves the same whether or not the editor had focus beforehand.
+    editor.commands.setTextSelection(targetPos)
+    editor.view.dom.focus({ preventScroll: true })
+
+    // `domAtPos` is meant for resolving cursor/text positions, not "the
+    // element for this node". At a block boundary — exactly where a
+    // heading's position sits — it commonly resolves to an ancestor
+    // container instead of the heading itself, so scrolling that container
+    // into view converges on the same spot regardless of which heading was
+    // clicked once the document is long enough. `nodeDOM` looks up the exact
+    // DOM node for a node position instead, which is what we actually want.
+    const getTarget = (): HTMLElement | null => {
+      const target = editor.view.nodeDOM(targetPos)
+      return target instanceof HTMLElement ? target : null
+    }
+
+    // Editor blocks use `content-visibility: auto` (see globals.css) so far
+    // offscreen sections skip layout for performance. Sections the jump
+    // scrolls *past* — not just the target itself — can take several frames
+    // to finish promoting from an estimated placeholder size to their real,
+    // fully-rendered size, which shifts everything below them (including our
+    // target) afterwards. That promotion isn't reliably done just because
+    // one check found the same position twice in a row — it can appear
+    // briefly stable and then drift once a further section finishes
+    // promoting a few frames later. Require several consecutive stable
+    // readings (not just one) before trusting convergence, with a bounded
+    // number of attempts as a safety net. Uses an instant (non-`smooth`)
+    // scroll throughout so each correction takes effect immediately instead
+    // of fighting an in-progress animation.
+    const REQUIRED_STABLE_FRAMES = 6
+    const MAX_ATTEMPTS = 40
+    let attempts = 0
+    let stableStreak = 0
+    let lastTop = getTarget()?.getBoundingClientRect().top ?? null
+    const settle = () => {
+      attempts += 1
+      getTarget()?.scrollIntoView({ block: 'center' })
+      const nextTop = getTarget()?.getBoundingClientRect().top ?? null
+      const stable = lastTop != null && nextTop != null && Math.abs(nextTop - lastTop) < 1
+      stableStreak = stable ? stableStreak + 1 : 0
+      lastTop = nextTop
+      if (stableStreak < REQUIRED_STABLE_FRAMES && attempts < MAX_ATTEMPTS) {
+        rafRef.current = requestAnimationFrame(settle)
+      }
+    }
+    rafRef.current = requestAnimationFrame(settle)
+
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+    }
   }, [editor, scrollToPos])
 
   if (!editor) return null

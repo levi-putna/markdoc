@@ -98,7 +98,12 @@ function DocumentWindow() {
   } = useDocumentStore()
 
   const [previewHtml, setPreviewHtml] = useState('')
-  const [scrollToPos, setScrollToPos] = useState<number | null>(null)
+  // `nonce` makes every jump a distinct value, even to the same heading twice
+  // in a row, without needing to reset back to `null` shortly after (which
+  // used to race with — and cut short — MarkdocEditor's multi-frame scroll
+  // convergence for headings far down long documents).
+  const [scrollToPos, setScrollToPos] = useState<{ pos: number; nonce: number } | null>(null)
+  const scrollNonce = useRef(0)
   const [scrollToChar, setScrollToChar] = useState<number | null>(null)
   const [previewScrollTop, setPreviewScrollTop] = useState(0)
   const editorRef = useRef<Editor | null>(null)
@@ -169,26 +174,33 @@ function DocumentWindow() {
     async (path: string) => {
       if (!window.markdoc) return
 
-      const recovery = await window.markdoc.checkRecovery(path)
-      const result = await window.markdoc.readFile(path)
+      try {
+        const recovery = await window.markdoc.checkRecovery(path)
+        const result = await window.markdoc.readFile(path)
 
-      let content = result.markdown
-      if (recovery.hasRecovery && recovery.content) {
-        const useRecovery = window.confirm('Recover unsaved changes from a previous session?')
-        if (useRecovery) {
-          content = recovery.content
-        } else {
-          await window.markdoc.clearRecovery(path)
+        let content = result.markdown
+        if (recovery.hasRecovery && recovery.content) {
+          const useRecovery = window.confirm('Recover unsaved changes from a previous session?')
+          if (useRecovery) {
+            content = recovery.content
+          } else {
+            await window.markdoc.clearRecovery(path)
+          }
         }
-      }
 
-      setMarkdown(content)
-      syncPreviewFromMarkdown(content)
-      syncIndexFromMarkdown(content)
-      setFilePath(path)
-      setFrontMatter(result.frontMatter)
-      setDirty(false)
-      await window.markdoc.watchFile(path)
+        setMarkdown(content)
+        syncPreviewFromMarkdown(content)
+        syncIndexFromMarkdown(content)
+        setFilePath(path)
+        setFrontMatter(result.frontMatter)
+        setDirty(false)
+        await window.markdoc.watchFile(path)
+      } catch (error) {
+        // Surface load failures (missing/unreadable file, parse errors) instead
+        // of failing silently and leaving the editor on stale content.
+        console.error('Failed to open file:', path, error)
+        window.alert(`Couldn't open “${path.split('/').pop()}”.\n\n${(error as Error).message ?? error}`)
+      }
     },
     [setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown]
   )
@@ -275,8 +287,8 @@ function DocumentWindow() {
         return
       }
 
-      setScrollToPos(item.pos)
-      setTimeout(() => setScrollToPos(null), 100)
+      scrollNonce.current += 1
+      setScrollToPos({ pos: item.pos, nonce: scrollNonce.current })
     },
     [markdown, viewMode]
   )

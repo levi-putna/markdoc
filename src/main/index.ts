@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu, shell } from 'electron'
 import { join } from 'path'
 import { readFile, writeFile, mkdir, access, unlink } from 'fs/promises'
 import { constants } from 'fs'
@@ -14,6 +14,7 @@ import {
   type ExportOptions,
 } from '../shared/ipc'
 import { parseMarkdownFile, serializeMarkdownFile } from '../shared/file-utils'
+import { checkForUpdates, REPO_RELEASES_URL } from './update-checker'
 
 const preferencesStore = new PreferencesStore()
 
@@ -25,13 +26,87 @@ let pendingOpenFiles: string[] = []
 
 /**
  * Resolves the window a menu action should target. Prefers the OS-reported
- * focused window, but falls back to the most recently created document
- * window — `getFocusedWindow()` can legitimately return null (e.g. right
- * after programmatic focus, or in automated/scripted contexts) even though
+ * focused window, but only if it's actually a document window — menu actions
+ * like Open/Save only make sense there, and `windows` is exactly the set of
+ * windows whose renderer has a `DocumentWindow` mounted (Preferences and any
+ * other utility window are deliberately excluded). Without this check, a
+ * focused Preferences window (or any other non-document window) would
+ * silently swallow the action: its renderer never listens for it, so e.g. a
+ * picked file path from File > Open would be sent nowhere and the document
+ * would never load. Falls back to the most recently created document window
+ * — `getFocusedWindow()` can legitimately return null (e.g. right after
+ * programmatic focus, or in automated/scripted contexts) even though
  * there's an obvious single window the action should apply to.
  */
 function getTargetWindow(): BrowserWindow | null {
-  return BrowserWindow.getFocusedWindow() ?? [...windows.values()].at(-1) ?? null
+  const focused = BrowserWindow.getFocusedWindow()
+  if (focused && windows.has(focused.id)) return focused
+  return [...windows.values()].at(-1) ?? null
+}
+
+/**
+ * Populates the native macOS About panel with MarkDoc's version information,
+ * so `role: 'about'` shows something more useful than the Electron defaults.
+ *
+ * Follows Apple's About panel layout (`NSApplication.AboutPanelOptionKey`):
+ * icon, `applicationName`, "Version `applicationVersion`", `credits`,
+ * `copyright`. The `credits` field surfaces the underlying runtime versions
+ * — Electron, Chromium, Node, and V8 — which is the convention most
+ * Electron apps (VS Code, Slack, Discord) use for their About screen, since
+ * that's usually the first thing a bug report needs.
+ */
+function configureAboutPanel(): void {
+  const { electron, chrome, node, v8 } = process.versions
+
+  app.setAboutPanelOptions({
+    applicationName: 'MarkDoc',
+    applicationVersion: app.getVersion(),
+    copyright: `Copyright © ${new Date().getFullYear()} MarkDoc`,
+    credits: `Electron ${electron} · Chromium ${chrome} · Node ${node} · V8 ${v8}`,
+  })
+}
+
+/**
+ * Checks GitHub for a newer MarkDoc version and reports the outcome to the
+ * user via a native dialog — whether an update is available, the app is
+ * already up to date, or the check failed (e.g. no network connection).
+ */
+async function checkForUpdatesAndNotify(win: BrowserWindow | null): Promise<void> {
+  // showMessageBox's typings require the window argument to be omitted
+  // entirely (not just undefined) when there's no parent to attach to.
+  const showDialog = (options: Electron.MessageBoxOptions) =>
+    win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
+
+  try {
+    const { currentVersion, latestVersion, isUpdateAvailable } = await checkForUpdates()
+
+    if (isUpdateAvailable) {
+      const { response } = await showDialog({
+        type: 'info',
+        buttons: ['View on GitHub', 'OK'],
+        defaultId: 0,
+        cancelId: 1,
+        message: 'A new version of MarkDoc is available',
+        detail: `Version ${latestVersion} is available — you're using ${currentVersion}.`,
+      })
+      if (response === 0) {
+        shell.openExternal(REPO_RELEASES_URL)
+      }
+    } else {
+      await showDialog({
+        type: 'info',
+        message: "You're up to date",
+        detail: `MarkDoc ${currentVersion} is the latest version.`,
+      })
+    }
+  } catch (error) {
+    log.error('Failed to check for updates', error)
+    await showDialog({
+      type: 'error',
+      message: 'Unable to check for updates',
+      detail: 'Please check your internet connection and try again.',
+    })
+  }
 }
 
 /**
@@ -47,6 +122,10 @@ function createApplicationMenu(): void {
             label: app.name,
             submenu: [
               { role: 'about' as const },
+              {
+                label: 'Check for Updates…',
+                click: () => checkForUpdatesAndNotify(getTargetWindow()),
+              },
               { type: 'separator' as const },
               {
                 label: 'Preferences…',
@@ -531,6 +610,7 @@ function bootstrap(): void {
 
   app.whenReady().then(async () => {
     await preferencesStore.load()
+    configureAboutPanel()
     createApplicationMenu()
     registerIpcHandlers()
 

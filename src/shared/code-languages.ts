@@ -27,6 +27,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   java: 'Java',
   javascript: 'JavaScript',
   json: 'JSON',
+  jsx: 'JSX',
   kotlin: 'Kotlin',
   less: 'Less',
   lua: 'Lua',
@@ -54,6 +55,14 @@ const LANGUAGE_LABELS: Record<string, string> = {
 }
 
 /**
+ * Aliases registered on top of `common`'s grammars (highlight.js resolves
+ * these to the same grammar as their canonical name — e.g. `jsx` highlights
+ * using the `javascript` grammar) that are useful to surface as their own
+ * picker entries, since they aren't top-level keys of `common` itself.
+ */
+const ALIAS_LANGUAGE_VALUES = ['jsx']
+
+/**
  * Language picker options for the code-block toolbar. "Auto" (no `language`
  * attribute — highlighting is guessed from content) and "Plain text"
  * (highlighting explicitly disabled) are pinned first; the rest are sorted
@@ -62,7 +71,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
 export const CODE_LANGUAGE_OPTIONS: CodeLanguageOption[] = [
   { value: '', label: 'Auto' },
   { value: 'plaintext', label: 'Plain text' },
-  ...Object.keys(common)
+  ...[...Object.keys(common), ...ALIAS_LANGUAGE_VALUES]
     .filter((value) => value !== 'plaintext')
     .map((value) => ({ value, label: LANGUAGE_LABELS[value] ?? value }))
     .sort((a, b) => a.label.localeCompare(b.label)),

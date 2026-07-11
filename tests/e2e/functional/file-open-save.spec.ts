@@ -82,6 +82,51 @@ test.describe('MarkDoc file open/save (TC-FILE)', () => {
     }
   })
 
+  test('TC-FILE.1b File > Open still loads the file when a non-document window has OS focus', async () => {
+    // Regression test: `getTargetWindow()` used to trust `getFocusedWindow()`
+    // unconditionally. If any non-document window (e.g. Preferences) had OS
+    // focus when File > Open fired, the picked path was sent to that window
+    // instead of a document window. That window's renderer never listens for
+    // `file:open-path`, so the path vanished into an unread buffer and the
+    // document silently never loaded — with no error surfaced anywhere.
+    const fixturePath = join(projectRoot, 'tests/fixtures/with-frontmatter.md')
+
+    const app = await electron.launch({
+      executablePath: electronPath,
+      args: [mainEntry],
+      env: { ...process.env, NODE_ENV: 'test', MARKDOC_TEST: '1' },
+    })
+
+    try {
+      const window = await app.firstWindow({ timeout: 30000 })
+      await window.waitForLoadState('domcontentloaded')
+      await expect(window.locator('[data-testid="document-window"]')).toBeVisible({ timeout: 15000 })
+
+      // Simulate a non-document window (stands in for Preferences) grabbing
+      // OS focus right before the user chooses File > Open.
+      await app.evaluate(({ BrowserWindow }) => {
+        const utilityWindow = new BrowserWindow({ width: 400, height: 300, show: true })
+        utilityWindow.loadURL('about:blank')
+        utilityWindow.focus()
+      })
+      await window.waitForTimeout(300)
+
+      await app.evaluate(({ dialog }, path) => {
+        dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as typeof dialog.showOpenDialog
+      }, fixturePath)
+
+      await app.evaluate(({ Menu }) => {
+        Menu.getApplicationMenu()?.getMenuItemById('menu-file-open')?.click()
+      })
+
+      const editorPane = window.locator('[data-testid="editor-pane"]')
+      await expect(editorPane).toContainText('Document With Front Matter', { timeout: 15000 })
+      await expect(editorPane).toContainText('Body content after front matter.')
+    } finally {
+      await app.close()
+    }
+  })
+
   test('TC-FILE.1 Save writes the edited document back to disk', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'markdoc-e2e-'))
     const tempFile = join(tempDir, 'save-test.md')
