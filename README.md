@@ -199,4 +199,4 @@ macos/            Quick Look preview extension (Swift)
 
 ## License
 
-MIT
+Free and open source under the [MIT License](LICENSE).
