@@ -10,18 +10,20 @@ import {
   Quote,
   Undo2,
   Redo2,
+  ImageIcon,
 } from 'lucide-react'
 import { BlockTypeSelect } from './BlockTypeSelect'
 import { TableInsertPicker } from './TableInsertPicker'
 
 interface EditorToolbarProps {
   editor: Editor
+  onInsertImage?: () => void
 }
 
 /**
  * Top formatting toolbar styled after the Tiptap simple editor template.
  */
-export function EditorToolbar({ editor }: EditorToolbarProps) {
+export function EditorToolbar({ editor, onInsertImage }: EditorToolbarProps) {
   const iconBtn = (active: boolean) =>
     `toolbar-icon-btn ${active ? 'toolbar-icon-btn--active' : ''}`
 
@@ -117,6 +119,17 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
 
       {/* Table insert */}
       <TableInsertPicker editor={editor} />
+
+      <button
+        type="button"
+        className="toolbar-icon-btn"
+        onClick={() => onInsertImage?.()}
+        aria-label="Insert image"
+        title="Insert image"
+        data-testid="insert-image-button"
+      >
+        <ImageIcon />
+      </button>
 
       {/* Undo / redo — far right */}
       <div className="ml-auto flex items-center gap-px">

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
+import type { StyleOverride } from './ipc'
 
 /**
  * Loads per-document style overrides from a sidecar JSON file.
@@ -29,9 +30,9 @@ export function loadStyleOverrides(sidecarPath: string): Record<string, string> 
  */
 export function saveStyleOverrides(
   sidecarPath: string,
-  overrides: Record<string, unknown>
+  overrides: StyleOverride | Record<string, unknown>
 ): void {
-  writeFileSync(sidecarPath, JSON.stringify({ version: 1, ...overrides }, null, 2), 'utf-8')
+  writeFileSync(sidecarPath, JSON.stringify({ ...overrides, version: 1 }, null, 2), 'utf-8')
 }
 
 /**

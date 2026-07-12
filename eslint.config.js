@@ -63,6 +63,13 @@ export default [
     },
   },
   {
-    ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**'],
+    ignores: [
+      'out/**',
+      'release/**',
+      'node_modules/**',
+      'dist/**',
+      // Vendored Quick Look preview scripts — not authored by us
+      'macos/QuickLookExtension/Resources/**',
+    ],
   },
 ]

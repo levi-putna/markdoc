@@ -29,9 +29,9 @@ test.describe('MarkDoc usability session', () => {
     await expect(window.locator('[data-testid="preview-pane"]')).toBeVisible()
     await window.screenshot({ path: 'test-results/usability-02-preview-mode.png' })
 
-    // Step 3: Switch to split mode
+    // Step 3: Split mode shows Markdown source + Preview (FR-3.3), not the WYSIWYG editor
     await window.locator('[data-testid="view-split"]').click()
-    await expect(window.locator('[data-testid="editor-pane"]')).toBeVisible()
+    await expect(window.locator('[data-testid="markdown-source-pane"]')).toBeVisible()
     await expect(window.locator('[data-testid="preview-pane"]')).toBeVisible()
     await window.screenshot({ path: 'test-results/usability-03-split-mode.png' })
 

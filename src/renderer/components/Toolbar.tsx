@@ -24,6 +24,8 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
     toggleSidebar,
     isDirty,
     wordCount,
+    charCount,
+    readingTimeMinutes,
     documentTier,
     largeDocModeDismissed,
     dismissLargeDocMode,
@@ -110,7 +112,7 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
           className="text-[11px] text-content-secondary [font-variant-numeric:tabular-nums]"
           data-testid="word-count"
         >
-          {wordCount.toLocaleString()} words
+          {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars · {readingTimeMinutes} min read
         </span>
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="max-w-[120px] truncate text-[11px] text-content-secondary">{title}</span>

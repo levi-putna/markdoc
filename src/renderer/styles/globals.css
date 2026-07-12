@@ -75,6 +75,11 @@ body {
   color: var(--content-text);
 }
 
+.tiptap .syntax-reveal {
+  color: var(--content-secondary);
+  opacity: 0.65;
+}
+
 .tiptap h1 {
   font-size: 28px;
   line-height: 34px;
@@ -361,6 +366,93 @@ body {
   line-height: 1.6;
   tab-size: 2;
   white-space: pre;
+}
+
+/* Mermaid diagram blocks (FR-8.2 / design-guide.md §10) */
+.mermaid-block-node {
+  background: var(--diagram-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px 12px 16px;
+}
+
+.mermaid-block-node pre,
+.mermaid-block-node .mermaid-block-source {
+  display: none;
+  margin: 12px 0 0;
+  background: var(--code-bg);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  text-align: left;
+}
+
+.mermaid-block-node--editing pre,
+.mermaid-block-node--editing .mermaid-block-source {
+  display: block;
+}
+
+.mermaid-block-preview {
+  margin-top: 28px;
+}
+
+.mermaid-diagram-mount {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  padding: 8px 4px;
+}
+
+.mermaid-diagram-mount svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-diagram-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.mermaid-diagram-mount--error {
+  display: block;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--status-error) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--status-error) 8%, var(--diagram-bg));
+  padding: 12px;
+}
+
+.mermaid-diagram-error-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--status-error);
+  margin-bottom: 6px;
+}
+
+.mermaid-diagram-error-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mermaid-diagram-error-message {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--content-text-secondary);
+}
+
+.mermaid-diagram-error-source {
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.preview-content .mermaid-diagram-mount {
+  margin: 16px 0;
 }
 
 .tiptap ul,

@@ -1,5 +1,6 @@
 import { Editor } from '@tiptap/core'
 import { createTiptapExtensions } from './tiptap-extensions'
+import { preprocessGfmExtensions, postprocessGfmExtensions } from './markdown-gfm'
 
 /**
  * Creates a headless Tiptap editor instance for Markdown round-trip conversion.
@@ -16,8 +17,8 @@ export function createMarkdownEditor(): Editor {
  */
 export function markdownRoundTrip(markdown: string): string {
   const editor = createMarkdownEditor()
-  editor.commands.setContent(markdown)
-  const result = editor.storage.markdown.getMarkdown()
+  editor.commands.setContent(preprocessGfmExtensions(markdown))
+  const result = postprocessGfmExtensions(editor.storage.markdown.getMarkdown())
   editor.destroy()
   return result
 }
@@ -27,7 +28,7 @@ export function markdownRoundTrip(markdown: string): string {
  */
 export function loadMarkdownIntoEditor(markdown: string): Editor {
   const editor = createMarkdownEditor()
-  editor.commands.setContent(markdown)
+  editor.commands.setContent(preprocessGfmExtensions(markdown))
   return editor
 }
 
@@ -35,5 +36,5 @@ export function loadMarkdownIntoEditor(markdown: string): Editor {
  * Serialises the current editor content to Markdown.
  */
 export function getMarkdownFromEditor(editor: Editor): string {
-  return editor.storage.markdown.getMarkdown()
+  return postprocessGfmExtensions(editor.storage.markdown.getMarkdown())
 }

@@ -1,7 +1,7 @@
 {
   "name": "markdoc",
   "productName": "MarkDoc",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A native macOS Markdown editor built with Electron and Tiptap",
   "main": "./out/main/index.js",
   "author": "MarkDoc",
@@ -53,6 +53,7 @@
     "gray-matter": "^4.0.3",
     "hast-util-to-html": "^9.0.5",
     "highlight.js": "^11.11.1",
+    "image-size": "^2.0.2",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.474.0",
     "mermaid": "^11.4.1",
@@ -101,8 +102,13 @@
     },
     "files": [
       "out/**/*",
-      "cli/**/*",
       "resources/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "cli/markdoc",
+        "to": "cli/markdoc"
+      }
     ],
     "publish": {
       "provider": "github",
@@ -112,8 +118,14 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

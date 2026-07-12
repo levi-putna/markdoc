@@ -23,6 +23,8 @@ declare module 'simplemde/dist/simplemde.min.js' {
     getDoc(): CodeMirrorDoc
     posFromIndex(index: number): CodeMirrorPosition
     scrollIntoView(position: CodeMirrorPosition, margin?: number): void
+    getScrollInfo(): { top: number; height: number; clientHeight: number }
+    scrollTo(x: number | null, y: number): void
     focus(): void
     getWrapperElement(): HTMLElement
   }

@@ -1,26 +1,42 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu, shell, clipboard, session, type WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { join } from 'path'
-import { readFile, writeFile, mkdir, access, unlink } from 'fs/promises'
-import { constants } from 'fs'
+import { join, dirname, basename, extname } from 'path'
+import { pathToFileURL } from 'url'
+import { tmpdir } from 'os'
+import { readFile, writeFile, mkdir, access, unlink, mkdtemp, rm, cp, rename } from 'fs/promises'
+import { constants, existsSync } from 'fs'
 import log from 'electron-log'
 import chokidar from 'chokidar'
 import icon from '../../resources/icon.png?asset'
 import { PreferencesStore } from './preferences-store'
 import {
   IPC_CHANNELS,
-  SUPPORTED_EXTENSIONS,
   type AppPreferences,
   type FileReadResult,
   type FileWritePayload,
-  type ExportOptions,
+  type ExportPdfPayload,
+  type ExportHtmlPayload,
+  type ExportDocxPayload,
+  type ExportResult,
+  type StyleOverride,
+  type WindowState,
+  type AssetWritePayload,
+  type FileOperationResult,
 } from '../shared/ipc'
-import { parseMarkdownFile, serializeMarkdownFile } from '../shared/file-utils'
+import { parseMarkdownFile, serializeMarkdownFile, getAssetFolderPath, getStyleSidecarPath } from '../shared/file-utils'
+import { exportToDocx, wrapStandaloneHtml } from '../shared/export'
+import { loadStyleOverrides, saveStyleOverrides } from '../shared/style-engine'
+import { findBrokenImageRefs, relativeAssetPath, generateImageFilename } from '../shared/asset-utils'
+import { rewriteAssetFolderInMarkdown, resolveLocalImagePath } from '../shared/image-paths'
+import { isRemoteImageSrc } from '../shared/image-src'
 import { checkForUpdatesManually, registerAutoUpdaterEvents, startBackgroundUpdateChecks } from './auto-updater'
+import { getCliInstallPath, installCli, isCliInstalled, uninstallCli } from './cli-installer'
+import { parseLaunchArgv } from '../shared/launch-args'
 
 const preferencesStore = new PreferencesStore()
 
 const windows = new Map<number, BrowserWindow>()
+const windowStates = new Map<number, Partial<WindowState>>()
 const fileWatchers = new Map<string, ReturnType<typeof chokidar.watch>>()
 // Windows waiting on a save round-trip before they can close
 const pendingCloseWindows = new Set<number>()
@@ -188,9 +204,35 @@ function createApplicationMenu(): void {
             getTargetWindow()?.webContents.send('menu:save-as')
           },
         },
+        {
+          label: 'Duplicate',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:duplicate')
+          },
+        },
+        {
+          label: 'Rename…',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:rename')
+          },
+        },
+        {
+          label: 'Move To…',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:move-to')
+          },
+        },
+        {
+          label: 'Revert to Saved',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:revert')
+          },
+        },
         { type: 'separator' },
         {
           label: 'Export To…',
+          accelerator: 'CmdOrCtrl+E',
           click: () => {
             getTargetWindow()?.webContents.send('menu:export')
           },
@@ -267,11 +309,48 @@ function createApplicationMenu(): void {
             getTargetWindow()?.webContents.send('menu:view-mode', 'split')
           },
         },
+        {
+          label: 'Document Styles…',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:document-styles')
+          },
+        },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
     },
     { role: 'windowMenu' },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Show Logs in Finder',
+          click: () => {
+            shell.openPath(join(app.getPath('logs'), 'MarkDoc'))
+          },
+        },
+        {
+          label: 'Copy Diagnostic Info',
+          click: async () => {
+            const { electron, chrome, node } = process.versions
+            const info = [
+              `MarkDoc ${app.getVersion()}`,
+              `macOS ${process.getSystemVersion()}`,
+              `Electron ${electron} · Chromium ${chrome} · Node ${node}`,
+              `Arch ${process.arch}`,
+            ].join('\n')
+            clipboard.writeText(info)
+            const win = getTargetWindow()
+            if (win) {
+              await dialog.showMessageBox(win, {
+                type: 'info',
+                message: 'Diagnostic info copied to clipboard',
+              })
+            }
+          },
+        },
+      ],
+    },
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
@@ -280,10 +359,18 @@ function createApplicationMenu(): void {
 /**
  * Creates a new document window.
  */
-function createDocumentWindow(filePath?: string): BrowserWindow {
+function createDocumentWindow({
+  filePath,
+  restoredState,
+}: {
+  filePath?: string
+  restoredState?: WindowState
+} = {}): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: restoredState?.bounds.width ?? 1200,
+    height: restoredState?.bounds.height ?? 800,
+    x: restoredState?.bounds.x,
+    y: restoredState?.bounds.y,
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
@@ -291,6 +378,7 @@ function createDocumentWindow(filePath?: string): BrowserWindow {
     visualEffectState: 'active',
     show: false,
     icon,
+    tabbingIdentifier: 'markdoc-document',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -304,8 +392,12 @@ function createDocumentWindow(filePath?: string): BrowserWindow {
 
   win.on('ready-to-show', () => {
     win.show()
-    if (filePath) {
-      win.webContents.send('file:open-path', filePath)
+    const openPath = filePath ?? restoredState?.filePath ?? undefined
+    if (openPath) {
+      win.webContents.send('file:open-path', openPath)
+    }
+    if (restoredState) {
+      win.webContents.send('window:restore-state', restoredState)
     }
   })
 
@@ -336,6 +428,8 @@ function createDocumentWindow(filePath?: string): BrowserWindow {
   win.on('closed', () => {
     pendingCloseWindows.delete(win.id)
     windows.delete(win.id)
+    windowStates.delete(win.id)
+    void persistSessionState()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -359,9 +453,13 @@ function createPreferencesWindow(): void {
   }
 
   preferencesWindow = new BrowserWindow({
-    width: 520,
-    height: 480,
-    resizable: false,
+    width: 720,
+    height: 560,
+    minWidth: 520,
+    minHeight: 400,
+    maxWidth: 960,
+    maxHeight: 720,
+    resizable: true,
     title: 'Preferences',
     icon,
     webPreferences: {
@@ -417,6 +515,50 @@ async function handleOpenDialog(win: BrowserWindow): Promise<string[]> {
 }
 
 /**
+ * Waits for web fonts and images to finish loading in the export window
+ * before calling `printToPDF`, since printing immediately after
+ * `did-finish-load` can capture a partially laid-out page.
+ */
+async function waitForExportPageReady(webContents: WebContents): Promise<void> {
+  await webContents.executeJavaScript(`
+    (async () => {
+      if (document.fonts?.ready) await document.fonts.ready;
+      await Promise.all(
+        Array.from(document.images).map(
+          (img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((resolve) => {
+                  img.onload = resolve;
+                  img.onerror = resolve;
+                })
+        )
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })()
+  `)
+}
+
+/**
+ * Persists open window states for session restoration (FR-5.9).
+ */
+async function persistSessionState(): Promise<void> {
+  const states: WindowState[] = []
+  for (const [id, win] of windows.entries()) {
+    const saved = windowStates.get(id)
+    if (!saved) continue
+    states.push({
+      filePath: saved.filePath ?? null,
+      bounds: win.getBounds(),
+      viewMode: saved.viewMode ?? 'edit',
+      sidebarVisible: saved.sidebarVisible ?? true,
+      sidebarWidth: saved.sidebarWidth ?? 240,
+    })
+  }
+  await preferencesStore.merge({ windowStates: states })
+}
+
+/**
  * Registers IPC handlers for file and preference operations.
  */
 function registerIpcHandlers(): void {
@@ -456,6 +598,13 @@ function registerIpcHandlers(): void {
     return handleOpenDialog(win)
   })
 
+  ipcMain.handle(IPC_CHANNELS.DIALOG_FOLDER, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+    return result.filePaths[0] ?? null
+  })
+
   ipcMain.handle(IPC_CHANNELS.DIALOG_SAVE_AS, async (event, defaultName?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return null
@@ -466,7 +615,7 @@ function registerIpcHandlers(): void {
     return result.filePath ?? null
   })
 
-  ipcMain.handle(IPC_CHANNELS.DIALOG_EXPORT, async (event, format: 'pdf' | 'docx' | 'html') => {
+  ipcMain.handle(IPC_CHANNELS.DIALOG_EXPORT, async (event, format: 'pdf' | 'docx' | 'html', defaultName?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return null
     const extensions: Record<string, string[]> = {
@@ -475,19 +624,44 @@ function registerIpcHandlers(): void {
       html: ['html'],
     }
     const result = await dialog.showSaveDialog(win, {
+      defaultPath: defaultName,
       filters: [{ name: format.toUpperCase(), extensions: extensions[format] }],
     })
     return result.filePath ?? null
   })
 
-  ipcMain.handle(IPC_CHANNELS.PREFS_GET, async () => preferencesStore.load())
+  ipcMain.handle(IPC_CHANNELS.PREFS_GET, async () => syncCliInstalledPreference())
 
   ipcMain.handle(IPC_CHANNELS.PREFS_SET, async (_, prefs: Partial<AppPreferences>) => {
     const updated = await preferencesStore.merge(prefs)
-    for (const win of windows.values()) {
-      win.webContents.send(IPC_CHANNELS.PREFS_CHANGED, updated)
-    }
+    broadcastPreferencesChanged(updated)
     return updated
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CLI_STATUS, async () => {
+    const installed = await isCliInstalled()
+    return {
+      installed,
+      installPath: installed ? await getCliInstallPath() : null,
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CLI_INSTALL, async () => {
+    const result = await installCli()
+    if (result.success) {
+      const updated = await preferencesStore.merge({ cliInstalled: true })
+      broadcastPreferencesChanged(updated)
+    }
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CLI_UNINSTALL, async () => {
+    const result = await uninstallCli()
+    if (result.success) {
+      const updated = await preferencesStore.merge({ cliInstalled: false })
+      broadcastPreferencesChanged(updated)
+    }
+    return result
   })
 
   ipcMain.handle(IPC_CHANNELS.APP_GET_THEME, async () => ({
@@ -545,32 +719,437 @@ function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.EXPORT_PDF, async (_, { html, destinationPath, pageSize }: ExportOptions & { html: string }) => {
-    const exportWin = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
-    await exportWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-    const pdfBuffer = await exportWin.webContents.printToPDF({
-      pageSize: pageSize ?? 'A4',
-      margins: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
+  // Export handlers (Section 12 of functional-requirements.md). Each is a
+  // request-response IPC call (TR-5.1) that resolves with `ExportResult`
+  // rather than throwing across the bridge, so a failing stage — render,
+  // rasterize, or write-to-disk — surfaces a clear message to the renderer
+  // instead of an unhandled rejection (FR-11.6/TR-10.5).
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_PDF,
+    async (
+      _,
+      { bodyHtml, css, isDark, title, destinationPath, pageSize, margins }: ExportPdfPayload
+    ): Promise<ExportResult> => {
+      let exportWin: BrowserWindow | null = null
+      let tempDir: string | null = null
+      try {
+        const html = wrapStandaloneHtml({ bodyHtml, css, isDark, title })
+        // Write to a temp file instead of a data URL — long documents with
+        // inlined CSS can exceed Chromium's data-URL length limits and get
+        // silently truncated.
+        tempDir = await mkdtemp(join(tmpdir(), 'markdoc-export-'))
+        const tempHtmlPath = join(tempDir, 'export.html')
+        await writeFile(tempHtmlPath, html, 'utf-8')
+
+        exportWin = new BrowserWindow({
+          show: false,
+          width: 794,
+          height: 1123,
+          webPreferences: { sandbox: true },
+        })
+        await exportWin.loadFile(tempHtmlPath)
+        await waitForExportPageReady(exportWin.webContents)
+
+        const pdfBuffer = await exportWin.webContents.printToPDF({
+          pageSize: pageSize ?? 'A4',
+          margins: margins ?? { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
+          printBackground: true,
+        })
+        await writeFile(destinationPath, pdfBuffer)
+        return { success: true }
+      } catch (error) {
+        log.error('PDF export failed', error)
+        return { success: false, error: (error as Error).message ?? 'Failed to export PDF' }
+      } finally {
+        exportWin?.close()
+        if (tempDir) {
+          await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_HTML,
+    async (_, { bodyHtml, css, isDark, title, destinationPath }: ExportHtmlPayload): Promise<ExportResult> => {
+      try {
+        const html = wrapStandaloneHtml({ bodyHtml, css, isDark, title })
+        await writeFile(destinationPath, html, 'utf-8')
+        return { success: true }
+      } catch (error) {
+        log.error('HTML export failed', error)
+        return { success: false, error: (error as Error).message ?? 'Failed to export HTML' }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_DOCX,
+    async (_, { doc, title, documentDir, destinationPath }: ExportDocxPayload): Promise<ExportResult> => {
+      try {
+        const { buffer, warnings } = await exportToDocx({ doc, title, documentDir })
+        await writeFile(destinationPath, buffer)
+        return { success: true, warnings: warnings.length > 0 ? warnings : undefined }
+      } catch (error) {
+        log.error('DOCX export failed', error)
+        return { success: false, error: (error as Error).message ?? 'Failed to export DOCX' }
+      }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.ASSET_WRITE, async (_, payload: AssetWritePayload) => {
+    const assetFolder = getAssetFolderPath(payload.documentPath)
+    await mkdir(assetFolder, { recursive: true })
+    const buffer = Buffer.from(payload.dataBase64, 'base64')
+    const absolutePath = join(assetFolder, payload.filename)
+    await writeFile(absolutePath, buffer)
+    const relativePath = relativeAssetPath({
+      documentPath: payload.documentPath,
+      filename: payload.filename,
     })
-    exportWin.close()
-    await writeFile(destinationPath, pdfBuffer)
+    return { relativePath, absolutePath }
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_READ,
+    async (_, { documentPath, relativePath }: { documentPath: string; relativePath: string }) => {
+      const absolutePath = join(dirname(documentPath), relativePath)
+      const buffer = await readFile(absolutePath)
+      const ext = extname(relativePath).toLowerCase()
+      const mimeType =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : ext === '.gif'
+              ? 'image/gif'
+              : ext === '.webp'
+                ? 'image/webp'
+                : 'application/octet-stream'
+      return { dataBase64: buffer.toString('base64'), mimeType }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_IMPORT,
+    async (_, { documentPath, sourcePath }: { documentPath: string; sourcePath: string }) => {
+      const assetFolder = getAssetFolderPath(documentPath)
+      await mkdir(assetFolder, { recursive: true })
+      const ext = extname(sourcePath).toLowerCase()
+      const mimeType =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : ext === '.gif'
+              ? 'image/gif'
+              : ext === '.webp'
+                ? 'image/webp'
+                : 'image/png'
+      const filename = generateImageFilename({ mimeType })
+      const absolutePath = join(assetFolder, filename)
+      await cp(sourcePath, absolutePath)
+      const relativePath = relativeAssetPath({ documentPath, filename })
+      return { relativePath, absolutePath }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.RESOLVE_IMAGE_SRC,
+    async (_, { documentPath, src }: { documentPath: string; src: string }) => {
+      if (isRemoteImageSrc({ src })) return src.trim()
+      const absolutePath = resolveLocalImagePath({ documentPath, src })
+      if (!absolutePath || !existsSync(absolutePath)) return null
+      return pathToFileURL(absolutePath).href
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_SAVE_AS_WITH_ASSETS,
+    async (
+      _,
+      {
+        oldFilePath,
+        newFilePath,
+        markdown,
+        frontMatter = {},
+      }: {
+        oldFilePath: string | null
+        newFilePath: string
+        markdown: string
+        frontMatter?: Record<string, unknown>
+      }
+    ) => {
+      let updatedMarkdown = markdown
+
+      if (oldFilePath) {
+        updatedMarkdown = rewriteAssetFolderInMarkdown({
+          markdown,
+          oldDocumentPath: oldFilePath,
+          newDocumentPath: newFilePath,
+        })
+
+        const oldAssetFolder = getAssetFolderPath(oldFilePath)
+        const newAssetFolder = getAssetFolderPath(newFilePath)
+
+        if (existsSync(oldAssetFolder) && oldAssetFolder !== newAssetFolder) {
+          await mkdir(dirname(newAssetFolder), { recursive: true })
+          if (existsSync(newAssetFolder)) {
+            await cp(oldAssetFolder, newAssetFolder, { recursive: true, force: true })
+          } else {
+            await cp(oldAssetFolder, newAssetFolder, { recursive: true })
+          }
+        }
+      }
+
+      await writeMarkdownFile({ filePath: newFilePath, markdown: updatedMarkdown, frontMatter })
+      app.addRecentDocument(newFilePath)
+      return { success: true, markdown: updatedMarkdown }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.STYLE_LOAD, async (_, documentPath: string) => {
+    return loadStyleOverrides(getStyleSidecarPath(documentPath))
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.STYLE_SAVE,
+    async (_, { documentPath, overrides }: { documentPath: string; overrides: StyleOverride }) => {
+      saveStyleOverrides(getStyleSidecarPath(documentPath), overrides)
+      return { success: true }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.STYLE_RESET, async (_, documentPath: string) => {
+    const sidecar = getStyleSidecarPath(documentPath)
+    try {
+      await unlink(sidecar)
+    } catch {
+      // Sidecar may not exist
+    }
     return { success: true }
   })
 
-  ipcMain.handle(IPC_CHANNELS.EXPORT_HTML, async (_, { html, destinationPath }: { html: string; destinationPath: string }) => {
-    await writeFile(destinationPath, html, 'utf-8')
-    return { success: true }
+  ipcMain.handle(IPC_CHANNELS.WINDOW_SAVE_STATE, async (event, state: WindowState) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+    windowStates.set(win.id, state)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_SAVE, async () => {
+    await persistSessionState()
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_DUPLICATE,
+    async (
+      _,
+      {
+        filePath,
+        markdown,
+        frontMatter,
+      }: { filePath: string; markdown: string; frontMatter: Record<string, unknown> }
+    ): Promise<FileOperationResult> => {
+      try {
+        const dir = dirname(filePath)
+        const base = basename(filePath).replace(/\.(md|markdown|mdown|mkd)$/i, '')
+        const ext = extname(filePath) || '.md'
+        let candidate = join(dir, `${base} copy${ext}`)
+        let counter = 2
+        while (existsSync(candidate)) {
+          candidate = join(dir, `${base} copy ${counter}${ext}`)
+          counter += 1
+        }
+        await writeMarkdownFile({ filePath: candidate, markdown, frontMatter })
+        const assetFolder = getAssetFolderPath(filePath)
+        if (existsSync(assetFolder)) {
+          await cp(assetFolder, getAssetFolderPath(candidate), { recursive: true })
+        }
+        const sidecar = getStyleSidecarPath(filePath)
+        if (existsSync(sidecar)) {
+          await cp(sidecar, getStyleSidecarPath(candidate))
+        }
+        return { success: true, newPath: candidate }
+      } catch (error) {
+        return { success: false, error: (error as Error).message }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_RENAME,
+    async (_, { filePath, newName }: { filePath: string; newName: string }): Promise<FileOperationResult> => {
+      try {
+        const dir = dirname(filePath)
+        const newPath = join(dir, newName)
+        await rename(filePath, newPath)
+        const assetFolder = getAssetFolderPath(filePath)
+        if (existsSync(assetFolder)) {
+          await rename(assetFolder, getAssetFolderPath(newPath))
+        }
+        const sidecar = getStyleSidecarPath(filePath)
+        if (existsSync(sidecar)) {
+          await rename(sidecar, getStyleSidecarPath(newPath))
+        }
+        return { success: true, newPath }
+      } catch (error) {
+        return { success: false, error: (error as Error).message }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_MOVE,
+    async (
+      _,
+      { filePath, destinationDir }: { filePath: string; destinationDir: string }
+    ): Promise<FileOperationResult> => {
+      try {
+        const newPath = join(destinationDir, basename(filePath))
+        await rename(filePath, newPath)
+        const assetFolder = getAssetFolderPath(filePath)
+        if (existsSync(assetFolder)) {
+          await rename(assetFolder, getAssetFolderPath(newPath))
+        }
+        const sidecar = getStyleSidecarPath(filePath)
+        if (existsSync(sidecar)) {
+          await rename(sidecar, getStyleSidecarPath(newPath))
+        }
+        return { success: true, newPath }
+      } catch (error) {
+        return { success: false, error: (error as Error).message }
+      }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.FILE_REVERT, async (_, filePath: string) => {
+    try {
+      return await readMarkdownFile(filePath)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_CHECK_IMAGES,
+    async (_, { documentPath, markdown }: { documentPath: string; markdown: string }) => {
+      return findBrokenImageRefs({
+        markdown,
+        documentPath,
+        existsFn: (absolutePath) => existsSync(absolutePath),
+      })
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.DIALOG_IMAGE_PICK, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+    })
+    if (!result.filePaths[0]) return null
+    const sourcePath = result.filePaths[0]
+    const ext = extname(sourcePath).toLowerCase()
+    const mimeType =
+      ext === '.png'
+        ? 'image/png'
+        : ext === '.jpg' || ext === '.jpeg'
+          ? 'image/jpeg'
+          : ext === '.gif'
+            ? 'image/gif'
+            : ext === '.webp'
+              ? 'image/webp'
+              : 'application/octet-stream'
+    return {
+      sourcePath,
+      mimeType,
+      filename: basename(sourcePath),
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_LOGS, async () => {
+    await shell.openPath(join(app.getPath('logs'), 'MarkDoc'))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.COPY_DIAGNOSTICS, async () => {
+    const { electron, chrome, node } = process.versions
+    const info = [
+      `MarkDoc ${app.getVersion()}`,
+      `macOS ${process.getSystemVersion()}`,
+      `Electron ${electron} · Chromium ${chrome} · Node ${node}`,
+      `Arch ${process.arch}`,
+    ].join('\n')
+    clipboard.writeText(info)
+    return info
   })
 }
 
 /**
- * Processes file paths from CLI or Finder launch arguments.
+ * Broadcasts preference changes to every open window.
  */
-function processLaunchFiles(argv: string[]): string[] {
-  return argv
-    .filter((arg) => !arg.startsWith('-') && SUPPORTED_EXTENSIONS.some((ext) => arg.toLowerCase().endsWith(ext)))
-    .map((p) => (p.startsWith('/') ? p : join(process.cwd(), p)))
+function broadcastPreferencesChanged(prefs: AppPreferences): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC_CHANNELS.PREFS_CHANGED, prefs)
+    }
+  }
 }
+
+/**
+ * Opens files received from the CLI, Finder, or cold-start argv.
+ */
+function openLaunchFiles({
+  files,
+  newWindow,
+}: {
+  files: string[]
+  newWindow: boolean
+}): void {
+  if (files.length === 0) {
+    const existing = BrowserWindow.getAllWindows()
+    if (existing.length > 0) {
+      existing[0].focus()
+    } else {
+      createDocumentWindow()
+    }
+    return
+  }
+
+  if (newWindow) {
+    for (const file of files) {
+      createDocumentWindow({ filePath: file })
+    }
+    return
+  }
+
+  const existing = [...windows.values()]
+  if (existing.length > 0) {
+    for (const file of files) {
+      createDocumentWindow({ filePath: file })
+    }
+    existing[0].focus()
+  } else {
+    for (const file of files) {
+      createDocumentWindow({ filePath: file })
+    }
+  }
+}
+
+/**
+ * Syncs the stored CLI install flag with the filesystem.
+ */
+async function syncCliInstalledPreference(): Promise<AppPreferences> {
+  const prefs = await preferencesStore.load()
+  const installed = await isCliInstalled()
+
+  if (installed === prefs.cliInstalled) {
+    return prefs
+  }
+
+  return preferencesStore.merge({ cliInstalled: installed })
+}
+
 
 /**
  * Application entry point.
@@ -593,25 +1172,18 @@ function bootstrap(): void {
     return
   }
 
-  app.on('second-instance', (_event, argv) => {
-    const files = processLaunchFiles(argv.slice(1))
-    const existing = BrowserWindow.getAllWindows()
-    if (existing.length > 0) {
-      for (const file of files) {
-        existing[0].webContents.send('file:open-path', file)
-      }
-      existing[0].focus()
-    } else {
-      for (const file of files) {
-        createDocumentWindow(file)
-      }
-    }
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    const { files, newWindow } = parseLaunchArgv({
+      argv: argv.slice(1),
+      cwd: workingDirectory,
+    })
+    openLaunchFiles({ files, newWindow })
   })
 
   app.on('open-file', (event, filePath) => {
     event.preventDefault()
     if (app.isReady()) {
-      createDocumentWindow(filePath)
+      createDocumentWindow({ filePath })
     } else {
       pendingOpenFiles.push(filePath)
     }
@@ -628,6 +1200,15 @@ function bootstrap(): void {
     configureAboutPanel()
     createApplicationMenu()
     registerIpcHandlers()
+
+    // Spellchecker language follows system locale (TR-2.13)
+    session.defaultSession.setSpellCheckerLanguages(
+      app.getLocale() ? [app.getLocale()] : ['en-AU']
+    )
+
+    app.on('before-quit', () => {
+      void persistSessionState()
+    })
 
     // Real auto-update: silently checks/downloads in the background and
     // only ever prompts once a download is ready (TR-6.6). No-op in
@@ -649,14 +1230,18 @@ function bootstrap(): void {
       }
     })
 
-    const launchFiles = [
-      ...pendingOpenFiles,
-      ...processLaunchFiles(process.argv.slice(1)),
-    ]
+    const coldLaunch = parseLaunchArgv({
+      argv: process.argv.slice(1),
+      cwd: process.cwd(),
+    })
+    const launchFiles = [...pendingOpenFiles, ...coldLaunch.files]
+    const prefs = await preferencesStore.load()
 
     if (launchFiles.length > 0) {
-      for (const file of launchFiles) {
-        createDocumentWindow(file)
+      openLaunchFiles({ files: launchFiles, newWindow: coldLaunch.newWindow })
+    } else if (prefs.windowStates.length > 0) {
+      for (const state of prefs.windowStates) {
+        createDocumentWindow({ restoredState: state })
       }
     } else {
       createDocumentWindow()

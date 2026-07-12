@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { NodeViewContent, NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
-import { Check, ChevronDown, Copy, CopyCheck, Maximize2, Minimize2, Plus } from 'lucide-react'
+import { Check, ChevronDown, Copy, CopyCheck, Maximize2, Minimize2, Pencil, Plus } from 'lucide-react'
 import { CODE_LANGUAGE_OPTIONS, getCodeLanguageLabel } from '@shared/code-languages'
+import { isMermaidLanguage } from '../utils/mermaid'
+import { MermaidDiagram } from './MermaidDiagram'
 
 /**
  * NodeView for fenced code blocks — renders the code-block "card" (design-guide.md
@@ -15,6 +17,7 @@ export function CodeBlockView({ node, updateAttributes, editor, getPos }: NodeVi
   const [copied, setCopied] = useState(false)
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null)
   const [fullscreenOpen, setFullscreenOpen] = useState(false)
+  const [editingDiagram, setEditingDiagram] = useState(false)
   const [draftText, setDraftText] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const langBtnRef = useRef<HTMLButtonElement>(null)
@@ -22,6 +25,8 @@ export function CodeBlockView({ node, updateAttributes, editor, getPos }: NodeVi
 
   const language: string = node.attrs.language ?? ''
   const activeLabel = getCodeLanguageLabel({ value: language })
+  const isMermaid = isMermaidLanguage({ language })
+  const isDark = document.documentElement.classList.contains('dark')
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -160,7 +165,12 @@ export function CodeBlockView({ node, updateAttributes, editor, getPos }: NodeVi
   }
 
   return (
-    <NodeViewWrapper className="code-block-node group" data-language={language || undefined}>
+    <NodeViewWrapper
+      className={`code-block-node group ${isMermaid ? 'mermaid-block-node' : ''} ${
+        isMermaid && editingDiagram ? 'mermaid-block-node--editing' : ''
+      }`.trim()}
+      data-language={language || undefined}
+    >
       {/* Language picker + copy action — sits above the card, non-editable chrome */}
       <div className="code-block-toolbar" contentEditable={false}>
         <div className="relative">
@@ -261,19 +271,37 @@ export function CodeBlockView({ node, updateAttributes, editor, getPos }: NodeVi
           {copied ? <CopyCheck size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
         </button>
 
-        <button
-          type="button"
-          className="code-block-copy-btn"
-          onClick={openFullscreen}
-          aria-label="Open full screen"
-          title="Open full screen"
-          data-testid="code-block-fullscreen-open"
-        >
-          <Maximize2 size={13} aria-hidden />
-        </button>
+        {isMermaid ? (
+          <button
+            type="button"
+            className="code-block-copy-btn"
+            onClick={() => setEditingDiagram((current) => !current)}
+            aria-label={editingDiagram ? 'Hide diagram source' : 'Edit diagram'}
+            title={editingDiagram ? 'Hide diagram source' : 'Edit diagram'}
+            data-testid="mermaid-edit-toggle"
+          >
+            <Pencil size={13} aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="code-block-copy-btn"
+            onClick={openFullscreen}
+            aria-label="Open full screen"
+            title="Open full screen"
+            data-testid="code-block-fullscreen-open"
+          >
+            <Maximize2 size={13} aria-hidden />
+          </button>
+        )}
       </div>
 
-      <pre>
+      {/* Mermaid inline preview — shown by default; source expands on demand (FR-8.2) */}
+      {isMermaid && (
+        <MermaidDiagram source={node.textContent} isDark={isDark} className="mermaid-block-preview" />
+      )}
+
+      <pre className={isMermaid ? 'mermaid-block-source' : undefined}>
         <NodeViewContent as="code" />
       </pre>
 

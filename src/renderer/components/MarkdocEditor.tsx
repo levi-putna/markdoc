@@ -1,6 +1,8 @@
 import { useEditor, EditorContent, ReactNodeViewRenderer, type Editor } from '@tiptap/react'
 import { useEffect, useRef } from 'react'
 import { createTiptapExtensions } from '@shared/tiptap-extensions'
+import { SyntaxReveal } from '@shared/syntax-reveal'
+import { MarkdocImage } from './ImageNodeView'
 import { getDebounceMs } from '@shared/types'
 import { getMarkdownFromEditor } from '@shared/markdown'
 import {
@@ -16,9 +18,7 @@ interface MarkdocEditorProps {
   content: string
   onContentChange?: ({ markdown, html }: { markdown: string; html: string }) => void
   onEditorReady?: ({ editor }: { editor: Editor }) => void
-  // `nonce` changes on every jump request, even to the same heading twice in
-  // a row, so the scroll effect always re-fires without needing a "reset to
-  // null" that would race with its own multi-frame scroll convergence below.
+  onInsertImage?: () => void
   scrollToPos?: { pos: number; nonce: number } | null
 }
 
@@ -29,11 +29,14 @@ export function MarkdocEditor({
   content,
   onContentChange,
   onEditorReady,
+  onInsertImage,
   scrollToPos,
 }: MarkdocEditorProps) {
   const {
     setOutline,
     setWordCount,
+    setCharCount,
+    setReadingTimeMinutes,
     setDocumentTier,
     setMarkdown,
     setActiveHeadingId,
@@ -46,9 +49,10 @@ export function MarkdocEditor({
   const rafRef = useRef<number | null>(null)
 
   const editor = useEditor({
-    extensions: createTiptapExtensions({
+    extensions: [...createTiptapExtensions({
       codeBlockNodeView: () => ReactNodeViewRenderer(CodeBlockView),
-    }),
+      imageExtension: MarkdocImage,
+    }), SyntaxReveal],
     content,
     editorProps: {
       attributes: {
@@ -59,11 +63,14 @@ export function MarkdocEditor({
     onUpdate: ({ editor: ed }) => {
       isLocalUpdate.current = true
       const markdown = getMarkdownFromEditor(ed)
-      const { outline, wordCount, documentTier: tier } = syncDocumentIndexFromEditor({ editor: ed })
+      const { outline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
+        syncDocumentIndexFromEditor({ editor: ed })
 
       setMarkdown(markdown)
       setOutline(outline)
       setWordCount(wordCount)
+      setCharCount(charCount)
+      setReadingTimeMinutes(readingTimeMinutes)
       setDocumentTier(tier)
 
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -82,9 +89,12 @@ export function MarkdocEditor({
     if (!editor) return
     onEditorReady?.({ editor })
 
-    const { outline, wordCount, documentTier: tier } = syncDocumentIndexFromEditor({ editor })
+    const { outline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
+      syncDocumentIndexFromEditor({ editor })
     setOutline(outline)
     setWordCount(wordCount)
+    setCharCount(charCount)
+    setReadingTimeMinutes(readingTimeMinutes)
     setDocumentTier(tier)
     setActiveHeadingId(findActiveHeadingId({ editor }))
     onContentChange?.({ markdown: getMarkdownFromEditor(editor), html: editor.getHTML() })
@@ -100,9 +110,12 @@ export function MarkdocEditor({
     const current = getMarkdownFromEditor(editor)
     if (current !== content) {
       editor.commands.setContent(content, false)
-      const { outline, wordCount, documentTier: tier } = syncDocumentIndexFromEditor({ editor })
+      const { outline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
+        syncDocumentIndexFromEditor({ editor })
       setOutline(outline)
       setWordCount(wordCount)
+      setCharCount(charCount)
+      setReadingTimeMinutes(readingTimeMinutes)
       setDocumentTier(tier)
       onContentChange?.({ markdown: content, html: editor.getHTML() })
     }
@@ -189,7 +202,7 @@ export function MarkdocEditor({
   return (
     <div className="simple-editor flex h-full flex-col bg-surface-primary" data-testid="editor-pane">
       {/* Formatting toolbar */}
-      <EditorToolbar editor={editor} />
+      <EditorToolbar editor={editor} onInsertImage={onInsertImage} />
 
       {/* Editor content area */}
       <div className="simple-editor-body relative flex-1 overflow-y-auto">

@@ -1,5 +1,23 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, type AppPreferences, type FileReadResult, type FileWritePayload, type ExportOptions } from '../shared/ipc'
+import {
+  IPC_CHANNELS,
+  type AppPreferences,
+  type FileReadResult,
+  type FileWritePayload,
+  type ExportFormat,
+  type ExportPdfPayload,
+  type ExportHtmlPayload,
+  type ExportDocxPayload,
+  type ExportResult,
+  type CliInstallResult,
+  type CliStatus,
+  type AssetWritePayload,
+  type AssetWriteResult,
+  type BrokenImageRef,
+  type FileOperationResult,
+  type StyleOverride,
+  type WindowState,
+} from '../shared/ipc'
 
 /**
  * Buffers `file:open-path` requests that arrive before the renderer has
@@ -19,6 +37,17 @@ ipcRenderer.on('file:open-path', (_event, filePath: string) => {
   }
 })
 
+const pendingRestoreStates: unknown[] = []
+let restoreStateListener: ((state: unknown) => void) | null = null
+
+ipcRenderer.on('window:restore-state', (_event, state: unknown) => {
+  if (restoreStateListener) {
+    restoreStateListener(state)
+  } else {
+    pendingRestoreStates.push(state)
+  }
+})
+
 /**
  * Typed preload bridge exposing a narrow API to the renderer.
  */
@@ -31,16 +60,24 @@ const markdocApi = {
 
   openDialog: (): Promise<string[]> => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN),
 
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_FOLDER),
+
   saveAsDialog: (defaultName?: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SAVE_AS, defaultName),
 
-  exportDialog: (format: 'pdf' | 'docx' | 'html'): Promise<string | null> =>
-    ipcRenderer.invoke(IPC_CHANNELS.DIALOG_EXPORT, format),
+  exportDialog: (format: ExportFormat, defaultName?: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC_CHANNELS.DIALOG_EXPORT, format, defaultName),
 
   getPreferences: (): Promise<AppPreferences> => ipcRenderer.invoke(IPC_CHANNELS.PREFS_GET),
 
   setPreferences: (prefs: Partial<AppPreferences>): Promise<AppPreferences> =>
     ipcRenderer.invoke(IPC_CHANNELS.PREFS_SET, prefs),
+
+  getCliStatus: (): Promise<CliStatus> => ipcRenderer.invoke(IPC_CHANNELS.CLI_STATUS),
+
+  installCli: (): Promise<CliInstallResult> => ipcRenderer.invoke(IPC_CHANNELS.CLI_INSTALL),
+
+  uninstallCli: (): Promise<CliInstallResult> => ipcRenderer.invoke(IPC_CHANNELS.CLI_UNINSTALL),
 
   onPreferencesChanged: (callback: (prefs: AppPreferences) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, prefs: AppPreferences) => callback(prefs)
@@ -65,6 +102,16 @@ const markdocApi = {
     }
     return () => {
       if (openPathListener === callback) openPathListener = null
+    }
+  },
+
+  onWindowRestoreState: (callback: (state: WindowState) => void): (() => void) => {
+    restoreStateListener = callback as (state: unknown) => void
+    while (pendingRestoreStates.length > 0) {
+      callback(pendingRestoreStates.shift() as WindowState)
+    }
+    return () => {
+      if (restoreStateListener === callback) restoreStateListener = null
     }
   },
 
@@ -107,11 +154,131 @@ const markdocApi = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.FILE_CHANGED_EXTERNAL, handler)
   },
 
-  exportPdf: (options: ExportOptions & { html: string }): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke(IPC_CHANNELS.EXPORT_PDF, options),
+  exportPdf: (payload: ExportPdfPayload): Promise<ExportResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.EXPORT_PDF, payload),
 
-  exportHtml: (options: { html: string; destinationPath: string }): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke(IPC_CHANNELS.EXPORT_HTML, options),
+  exportHtml: (payload: ExportHtmlPayload): Promise<ExportResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.EXPORT_HTML, payload),
+
+  exportDocx: (payload: ExportDocxPayload): Promise<ExportResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.EXPORT_DOCX, payload),
+
+  writeAsset: (payload: AssetWritePayload): Promise<AssetWriteResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.ASSET_WRITE, payload),
+
+  readAsset: ({
+    documentPath,
+    relativePath,
+  }: {
+    documentPath: string
+    relativePath: string
+  }): Promise<{ dataBase64: string; mimeType: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.ASSET_READ, { documentPath, relativePath }),
+
+  loadStyleOverrides: (documentPath: string): Promise<Record<string, string>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.STYLE_LOAD, documentPath),
+
+  saveStyleOverrides: ({
+    documentPath,
+    overrides,
+  }: {
+    documentPath: string
+    overrides: StyleOverride
+  }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.STYLE_SAVE, { documentPath, overrides }),
+
+  resetStyleOverrides: (documentPath: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.STYLE_RESET, documentPath),
+
+  saveWindowState: (state: WindowState): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SAVE_STATE, state),
+
+  saveSession: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_SAVE),
+
+  duplicateFile: ({
+    filePath,
+    markdown,
+    frontMatter,
+  }: {
+    filePath: string
+    markdown: string
+    frontMatter: Record<string, unknown>
+  }): Promise<FileOperationResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_DUPLICATE, { filePath, markdown, frontMatter }),
+
+  renameFile: ({
+    filePath,
+    newName,
+  }: {
+    filePath: string
+    newName: string
+  }): Promise<FileOperationResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_RENAME, { filePath, newName }),
+
+  moveFile: ({
+    filePath,
+    destinationDir,
+  }: {
+    filePath: string
+    destinationDir: string
+  }): Promise<FileOperationResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_MOVE, { filePath, destinationDir }),
+
+  revertFile: (filePath: string): Promise<FileReadResult | null> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_REVERT, filePath),
+
+  checkBrokenImages: ({
+    documentPath,
+    markdown,
+  }: {
+    documentPath: string
+    markdown: string
+  }): Promise<BrokenImageRef[]> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_CHECK_IMAGES, { documentPath, markdown }),
+
+  importAsset: ({
+    documentPath,
+    sourcePath,
+  }: {
+    documentPath: string
+    sourcePath: string
+  }): Promise<AssetWriteResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.ASSET_IMPORT, { documentPath, sourcePath }),
+
+  resolveImageSrc: ({
+    documentPath,
+    src,
+  }: {
+    documentPath: string
+    src: string
+  }): Promise<string | null> =>
+    ipcRenderer.invoke(IPC_CHANNELS.RESOLVE_IMAGE_SRC, { documentPath, src }),
+
+  saveAsWithAssets: ({
+    oldFilePath,
+    newFilePath,
+    markdown,
+    frontMatter,
+  }: {
+    oldFilePath: string | null
+    newFilePath: string
+    markdown: string
+    frontMatter?: Record<string, unknown>
+  }): Promise<{ success: boolean; markdown: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_SAVE_AS_WITH_ASSETS, {
+      oldFilePath,
+      newFilePath,
+      markdown,
+      frontMatter,
+    }),
+
+  pickImage: (): Promise<{ sourcePath: string; mimeType: string; filename: string } | null> =>
+    ipcRenderer.invoke(IPC_CHANNELS.DIALOG_IMAGE_PICK),
+
+  openLogsInFinder: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OPEN_LOGS),
+
+  copyDiagnostics: (): Promise<string> =>
+    ipcRenderer.invoke(IPC_CHANNELS.COPY_DIAGNOSTICS),
 }
 
 contextBridge.exposeInMainWorld('markdoc', markdocApi)

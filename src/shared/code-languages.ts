@@ -6,6 +6,7 @@ import { createLowlight, common } from 'lowlight'
  * code-block extension to decorate fenced code with syntax-highlight tokens.
  */
 export const lowlight = createLowlight(common)
+lowlight.registerAlias({ mermaid: 'plaintext' })
 
 export interface CodeLanguageOption {
   value: string
@@ -71,6 +72,7 @@ const ALIAS_LANGUAGE_VALUES = ['jsx']
 export const CODE_LANGUAGE_OPTIONS: CodeLanguageOption[] = [
   { value: '', label: 'Auto' },
   { value: 'plaintext', label: 'Plain text' },
+  { value: 'mermaid', label: 'Mermaid' },
   ...[...Object.keys(common), ...ALIAS_LANGUAGE_VALUES]
     .filter((value) => value !== 'plaintext')
     .map((value) => ({ value, label: LANGUAGE_LABELS[value] ?? value }))

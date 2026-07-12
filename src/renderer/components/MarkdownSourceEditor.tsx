@@ -7,7 +7,9 @@ import { useDocumentStore } from '../store/document-store'
 interface MarkdownSourceEditorProps {
   value: string
   scrollToChar?: number | null
+  scrollRatio?: number | null
   onChange: ({ markdown }: { markdown: string }) => void
+  onScrollRatio?: (ratio: number) => void
 }
 
 /**
@@ -16,7 +18,9 @@ interface MarkdownSourceEditorProps {
 export function MarkdownSourceEditor({
   value,
   scrollToChar,
+  scrollRatio,
   onChange,
+  onScrollRatio,
 }: MarkdownSourceEditorProps) {
   const { preferences } = useDocumentStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -41,6 +45,13 @@ export function MarkdownSourceEditor({
     editor.codemirror.on('change', () => {
       isInternalChange.current = true
       onChangeRef.current({ markdown: editor.value() })
+    })
+
+    editor.codemirror.on('scroll', () => {
+      const scrollInfo = editor.codemirror.getScrollInfo()
+      const maxScroll = scrollInfo.height - scrollInfo.clientHeight
+      const ratio = maxScroll > 0 ? scrollInfo.top / maxScroll : 0
+      onScrollRatio?.(ratio)
     })
 
     editorRef.current = editor
@@ -75,6 +86,17 @@ export function MarkdownSourceEditor({
     doc.setCursor(position)
     editor.codemirror.scrollIntoView(position, 80)
   }, [scrollToChar])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor || scrollRatio == null) return
+    const scrollInfo = editor.codemirror.getScrollInfo()
+    const maxScroll = scrollInfo.height - scrollInfo.clientHeight
+    const top = maxScroll * scrollRatio
+    if (Math.abs(scrollInfo.top - top) > 2) {
+      editor.codemirror.scrollTo(null, top)
+    }
+  }, [scrollRatio])
 
   /**
    * CodeMirror already places the caret sensibly for clicks on its own

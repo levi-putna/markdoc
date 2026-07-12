@@ -7,7 +7,7 @@ import { useDocumentStore } from '../store/document-store'
 interface SearchOverlayProps {
   markdown: string
   outlineTexts: Array<{ text: string; pos: number }>
-  onSelect: (pos: number) => void
+  onSelect: (pos: number, query?: string) => void
   onClose: () => void
 }
 
@@ -83,7 +83,7 @@ export function SearchOverlay({ markdown, outlineTexts, onSelect, onClose }: Sea
         e.preventDefault()
         setSelectedIndex((i) => Math.max(i - 1, 0))
       } else if (e.key === 'Enter' && results[selectedIndex]) {
-        onSelect(results[selectedIndex].pos)
+        onSelect(results[selectedIndex].pos, query)
         onClose()
       } else if (e.key === 'Tab') {
         // Trap focus within the overlay while it is open
@@ -171,7 +171,7 @@ export function SearchOverlay({ markdown, outlineTexts, onSelect, onClose }: Sea
                   i === selectedIndex ? 'bg-accent/10' : ''
                 }`}
                 onClick={() => {
-                  onSelect(result.pos)
+                  onSelect(result.pos, query)
                   onClose()
                 }}
                 data-testid={`search-result-${result.id}`}

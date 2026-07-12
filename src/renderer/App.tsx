@@ -7,15 +7,19 @@ import { MarkdocEditor } from './components/MarkdocEditor'
 import { MarkdownSourceEditor } from './components/MarkdownSourceEditor'
 import { PreviewPane } from './components/PreviewPane'
 import { SearchOverlay, useSearchShortcut } from './components/SearchOverlay'
+import { FindReplaceDialog } from './components/FindReplaceDialog'
+import { ImageInsertDialog } from './components/ImageInsertDialog'
+import { StyleOverridesPanel } from './components/StyleOverridesPanel'
+import { ExportDialog } from './components/ExportDialog'
 import { PreferencesPage } from './components/PreferencesPage'
 import { flattenOutline } from '@shared/document-index'
 import { findHeadingCharOffset } from '@shared/markdown-highlight'
-import { loadMarkdownIntoEditor } from '@shared/markdown'
+import { parseMarkdownAsync } from '@shared/markdown-async'
 import {
   moveSectionInEditor,
-  syncDocumentIndexFromEditor,
 } from '@shared/outline-sync'
 import type { FlatOutlineItem } from '@shared/types'
+import type { StyleOverride, WindowState } from '@shared/ipc'
 
 /**
  * Applies the light/dark theme class from preferences + system appearance.
@@ -80,7 +84,11 @@ function DocumentWindow() {
     viewMode,
     sidebarVisible,
     searchOpen,
+    findReplaceOpen,
+    stylePanelOpen,
     setSearchOpen,
+    setFindReplaceOpen,
+    setStylePanelOpen,
     markdown,
     filePath,
     frontMatter,
@@ -94,10 +102,22 @@ function DocumentWindow() {
     setPreferences,
     setOutline,
     setWordCount,
+    setCharCount,
+    setReadingTimeMinutes,
     setDocumentTier,
+    sidebarWidth,
+    styleOverrides,
+    setStyleOverrides,
+    setBrokenImages,
+    brokenImages,
+    setHighlightRange,
+    setViewMode,
+    setSidebarWidth,
   } = useDocumentStore()
 
   const [previewHtml, setPreviewHtml] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [imageInsertOpen, setImageInsertOpen] = useState(false)
   // `nonce` makes every jump a distinct value, even to the same heading twice
   // in a row, without needing to reset back to `null` shortly after (which
   // used to race with — and cut short — MarkdocEditor's multi-frame scroll
@@ -105,38 +125,92 @@ function DocumentWindow() {
   const [scrollToPos, setScrollToPos] = useState<{ pos: number; nonce: number } | null>(null)
   const scrollNonce = useRef(0)
   const [scrollToChar, setScrollToChar] = useState<number | null>(null)
-  const [previewScrollTop, setPreviewScrollTop] = useState(0)
+  const [splitScrollRatio, setSplitScrollRatio] = useState<number | null>(null)
+  const [styleDraft, setStyleDraft] = useState<StyleOverride>({ version: 1 })
   const editorRef = useRef<Editor | null>(null)
   const recoveryInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useSearchShortcut()
 
-  const syncPreviewFromMarkdown = useCallback((md: string) => {
-    const editor = loadMarkdownIntoEditor(md)
-    setPreviewHtml(editor.getHTML())
-    editor.destroy()
+  const syncPreviewFromMarkdown = useCallback(async (md: string) => {
+    const { html } = await parseMarkdownAsync({ markdown: md })
+    setPreviewHtml(html)
   }, [])
 
   const syncIndexFromMarkdown = useCallback(
-    (md: string) => {
-      const editor = loadMarkdownIntoEditor(md)
-      const { outline: nextOutline, wordCount, documentTier } = syncDocumentIndexFromEditor({
-        editor,
-      })
+    async (md: string) => {
+      const { outline: nextOutline, wordCount, documentTier, charCount, readingTimeMinutes } =
+        await parseMarkdownAsync({ markdown: md })
       setOutline(nextOutline)
       setWordCount(wordCount)
+      setCharCount(charCount)
+      setReadingTimeMinutes(readingTimeMinutes)
       setDocumentTier(documentTier)
-      editor.destroy()
     },
-    [setOutline, setWordCount, setDocumentTier]
+    [setOutline, setWordCount, setCharCount, setReadingTimeMinutes, setDocumentTier]
   )
+
+  // Apply per-document style overrides to the document root
+  useEffect(() => {
+    for (const [key, value] of Object.entries(styleOverrides)) {
+      document.documentElement.style.setProperty(key, value)
+    }
+  }, [styleOverrides])
+
+  // Persist window state for session restoration
+  useEffect(() => {
+    const saveState = () => {
+      if (!window.markdoc) return
+      const state: WindowState = {
+        filePath,
+        bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight },
+        viewMode,
+        sidebarVisible,
+        sidebarWidth,
+      }
+      void window.markdoc.saveWindowState(state)
+    }
+    const interval = setInterval(saveState, 5000)
+    window.addEventListener('beforeunload', saveState)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('beforeunload', saveState)
+      saveState()
+    }
+  }, [filePath, viewMode, sidebarVisible, sidebarWidth])
+
+  // Restore window state from previous session
+  useEffect(() => {
+    if (!window.markdoc) return
+    return window.markdoc.onWindowRestoreState((state) => {
+      setViewMode(state.viewMode)
+      if (!state.sidebarVisible) useDocumentStore.getState().toggleSidebar()
+      setSidebarWidth(state.sidebarWidth)
+    })
+  }, [setViewMode, setSidebarWidth])
 
   // Load preferences on mount (theme handling lives in useAppTheme)
   useEffect(() => {
     window.markdoc?.getPreferences().then(setPreferences)
   }, [setPreferences])
 
-  // Apply editor font and sidebar density preferences
+  const loadStyleForDocument = useCallback(async (path: string) => {
+    if (!window.markdoc) return
+    const overrides = await window.markdoc.loadStyleOverrides(path)
+    setStyleOverrides(overrides)
+    setStyleDraft({ version: 1, ...overrides })
+  }, [setStyleOverrides])
+
+  const checkImages = useCallback(async (path: string, md: string) => {
+    if (!window.markdoc) return
+    const broken = await window.markdoc.checkBrokenImages({ documentPath: path, markdown: md })
+    setBrokenImages(broken)
+    if (broken.length > 0) {
+      window.alert(
+        `${broken.length} broken image reference(s) found:\n${broken.map((b) => `Line ${b.line}: ${b.src}`).join('\n')}`
+      )
+    }
+  }, [setBrokenImages])
   useEffect(() => {
     document.documentElement.style.setProperty('--editor-font-size', `${preferences.editorFontSize}px`)
     document.documentElement.style.setProperty('--editor-line-spacing', String(preferences.editorLineSpacing))
@@ -189,12 +263,14 @@ function DocumentWindow() {
         }
 
         setMarkdown(content)
-        syncPreviewFromMarkdown(content)
-        syncIndexFromMarkdown(content)
+        await syncPreviewFromMarkdown(content)
+        await syncIndexFromMarkdown(content)
         setFilePath(path)
         setFrontMatter(result.frontMatter)
         setDirty(false)
         await window.markdoc.watchFile(path)
+        await loadStyleForDocument(path)
+        await checkImages(path, content)
       } catch (error) {
         // Surface load failures (missing/unreadable file, parse errors) instead
         // of failing silently and leaving the editor on stale content.
@@ -202,7 +278,7 @@ function DocumentWindow() {
         window.alert(`Couldn't open “${path.split('/').pop()}”.\n\n${(error as Error).message ?? error}`)
       }
     },
-    [setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown]
+    [setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown, loadStyleForDocument, checkImages]
   )
 
   const handleSave = useCallback(async () => {
@@ -220,10 +296,25 @@ function DocumentWindow() {
     if (!window.markdoc) return
     const path = await window.markdoc.saveAsDialog(filePath?.split('/').pop() ?? 'Untitled.md')
     if (!path) return
-    await window.markdoc.writeFile({ filePath: path, markdown, frontMatter })
+
+    const result = await window.markdoc.saveAsWithAssets({
+      oldFilePath: filePath,
+      newFilePath: path,
+      markdown,
+      frontMatter,
+    })
+
+    if (result.markdown !== markdown) {
+      setMarkdown(result.markdown)
+      await syncPreviewFromMarkdown(result.markdown)
+      await syncIndexFromMarkdown(result.markdown)
+    }
+
     setFilePath(path)
     setDirty(false)
-  }, [markdown, filePath, frontMatter])
+    await window.markdoc.watchFile(path)
+    await window.markdoc.clearRecovery(path)
+  }, [markdown, filePath, frontMatter, setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown])
 
   // Menu action handlers. Depends on handleSave/handleSaveAs/loadFile (not just
   // filePath) so it always re-subscribes with the latest markdown — otherwise
@@ -240,6 +331,44 @@ function DocumentWindow() {
         useDocumentStore.getState().setViewMode(mode as 'edit' | 'markdown' | 'preview' | 'split')
       ),
       window.markdoc.onMenuAction('find', () => setSearchOpen(true)),
+      window.markdoc.onMenuAction('find-replace', () => setFindReplaceOpen(true)),
+      window.markdoc.onMenuAction('duplicate', async () => {
+        if (!filePath || !window.markdoc) return
+        const result = await window.markdoc.duplicateFile({ filePath, markdown, frontMatter })
+        if (result.success && result.newPath) loadFile(result.newPath)
+      }),
+      window.markdoc.onMenuAction('rename', async () => {
+        if (!filePath || !window.markdoc) return
+        const newName = window.prompt('Rename to:', filePath.split('/').pop() ?? '')
+        if (!newName) return
+        const result = await window.markdoc.renameFile({ filePath, newName })
+        if (result.success && result.newPath) {
+          setFilePath(result.newPath)
+          await window.markdoc.watchFile(result.newPath)
+        }
+      }),
+      window.markdoc.onMenuAction('move-to', async () => {
+        if (!filePath || !window.markdoc) return
+        const paths = await window.markdoc.pickFolder()
+        if (!paths) return
+        const result = await window.markdoc.moveFile({ filePath, destinationDir: paths })
+        if (result.success && result.newPath) {
+          setFilePath(result.newPath)
+          await window.markdoc.watchFile(result.newPath)
+        }
+      }),
+      window.markdoc.onMenuAction('revert', async () => {
+        if (!filePath || !window.markdoc) return
+        const result = await window.markdoc.revertFile(filePath)
+        if (!result) return
+        setMarkdown(result.markdown)
+        setFrontMatter(result.frontMatter)
+        await syncPreviewFromMarkdown(result.markdown)
+        await syncIndexFromMarkdown(result.markdown)
+        setDirty(false)
+      }),
+      window.markdoc.onMenuAction('export', () => setExportOpen(true)),
+      window.markdoc.onMenuAction('document-styles', () => setStylePanelOpen(true)),
       window.markdoc.onFileOpenRequested((path) => loadFile(path)),
       window.markdoc.onFileChangedExternal((path) => {
         if (path === filePath) {
@@ -252,7 +381,7 @@ function DocumentWindow() {
     ]
 
     return () => unsubs.forEach((u) => u?.())
-  }, [filePath, handleSave, handleSaveAs, loadFile, setSearchOpen])
+  }, [filePath, frontMatter, markdown, handleSave, handleSaveAs, loadFile, setFindReplaceOpen, setSearchOpen, setStylePanelOpen, syncIndexFromMarkdown, syncPreviewFromMarkdown, setMarkdown, setFrontMatter, setDirty, setFilePath])
 
   const handleEditorReady = useCallback(({ editor }: { editor: Editor }) => {
     editorRef.current = editor
@@ -266,10 +395,10 @@ function DocumentWindow() {
   )
 
   const handleMarkdownSourceChange = useCallback(
-    ({ markdown: md }: { markdown: string }) => {
+    async ({ markdown: md }: { markdown: string }) => {
       setMarkdown(md)
-      syncIndexFromMarkdown(md)
-      syncPreviewFromMarkdown(md)
+      await syncIndexFromMarkdown(md)
+      await syncPreviewFromMarkdown(md)
     },
     [setMarkdown, syncIndexFromMarkdown, syncPreviewFromMarkdown]
   )
@@ -294,7 +423,10 @@ function DocumentWindow() {
   )
 
   const handleSearchJump = useCallback(
-    (charOffset: number) => {
+    (charOffset: number, queryLength = 0) => {
+      setHighlightRange({ from: charOffset, to: charOffset + queryLength })
+      setTimeout(() => setHighlightRange(null), 2000)
+
       if (viewMode === 'markdown' || viewMode === 'split') {
         setScrollToChar(charOffset)
         setTimeout(() => setScrollToChar(null), 100)
@@ -306,25 +438,73 @@ function DocumentWindow() {
       editor.commands.focus()
       editor.commands.setTextSelection(charOffset)
     },
-    [viewMode]
+    [viewMode, setHighlightRange]
   )
 
   const handleOutlineReorder = useCallback(
     ({
       activeItem,
       overItem,
+      projectedDepth,
     }: {
       activeItem: FlatOutlineItem
       overItem: FlatOutlineItem
+      projectedDepth: number
     }) => {
       const editor = editorRef.current
       if (!editor) return
 
-      moveSectionInEditor({ editor, activeItem, overItem })
+      moveSectionInEditor({ editor, activeItem, overItem, projectedDepth })
       setDirty(true)
     },
-    []
+    [setDirty]
   )
+
+  const handleFileDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault()
+      const dropped = event.dataTransfer.files[0]
+      if (!dropped?.path) return
+      loadFile(dropped.path)
+    },
+    [loadFile]
+  )
+
+  const insertImageIntoEditor = useCallback(
+    ({ src, alt }: { src: string; alt: string }) => {
+      if (!editorRef.current) return
+      editorRef.current.chain().focus().setImage({ src, alt: alt || undefined }).run()
+      setDirty(true)
+    },
+    [setDirty]
+  )
+
+  const handleInsertLocalImage = useCallback(
+    async ({ alt }: { alt: string }) => {
+      if (!window.markdoc || !filePath) {
+        throw new Error('Save the document before inserting local images.')
+      }
+      const picked = await window.markdoc.pickImage()
+      if (!picked) return
+      const { relativePath } = await window.markdoc.importAsset({
+        documentPath: filePath,
+        sourcePath: picked.sourcePath,
+      })
+      insertImageIntoEditor({ src: relativePath, alt })
+    },
+    [filePath, insertImageIntoEditor]
+  )
+
+  const handleInsertUrlImage = useCallback(
+    ({ url, alt }: { url: string; alt: string }) => {
+      insertImageIntoEditor({ src: url, alt })
+    },
+    [insertImageIntoEditor]
+  )
+
+  const handleOpenImageDialog = useCallback(() => {
+    setImageInsertOpen(true)
+  }, [])
 
   const flatOutline = flattenOutline(outline)
   const outlineTexts = flatOutline.map((i) => ({ text: i.text, pos: i.pos }))
@@ -334,7 +514,12 @@ function DocumentWindow() {
   const showPreview = viewMode === 'preview' || viewMode === 'split'
 
   return (
-    <div className="flex h-full flex-col" data-testid="document-window">
+    <div
+      className="flex h-full flex-col"
+      data-testid="document-window"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={handleFileDrop}
+    >
       {/* App toolbar */}
       <Toolbar onSearchOpen={() => setSearchOpen(true)} />
 
@@ -353,6 +538,7 @@ function DocumentWindow() {
               onEditorReady={handleEditorReady}
               onContentChange={handleEditorContentChange}
               scrollToPos={scrollToPos}
+              onInsertImage={handleOpenImageDialog}
             />
           </div>
 
@@ -366,6 +552,8 @@ function DocumentWindow() {
                 value={markdown}
                 onChange={handleMarkdownSourceChange}
                 scrollToChar={scrollToChar}
+                scrollRatio={viewMode === 'split' ? splitScrollRatio : null}
+                onScrollRatio={viewMode === 'split' ? setSplitScrollRatio : undefined}
               />
             </div>
           )}
@@ -374,8 +562,8 @@ function DocumentWindow() {
             <div className={`h-full overflow-hidden ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}>
               <PreviewPane
                 html={previewHtml || '<p></p>'}
-                scrollTop={viewMode === 'split' ? previewScrollTop : undefined}
-                onScroll={viewMode === 'split' ? setPreviewScrollTop : undefined}
+                scrollRatio={viewMode === 'split' ? splitScrollRatio : null}
+                onScrollRatio={viewMode === 'split' ? setSplitScrollRatio : undefined}
               />
             </div>
           )}
@@ -387,8 +575,65 @@ function DocumentWindow() {
         <SearchOverlay
           markdown={markdown}
           outlineTexts={outlineTexts}
-          onSelect={handleSearchJump}
+          onSelect={(pos, query) => handleSearchJump(pos, query?.length ?? 0)}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {imageInsertOpen && (
+        <ImageInsertDialog
+          onInsertLocal={handleInsertLocalImage}
+          onInsertUrl={handleInsertUrlImage}
+          onClose={() => setImageInsertOpen(false)}
+        />
+      )}
+
+      {findReplaceOpen && (
+        <FindReplaceDialog
+          markdown={markdown}
+          onReplace={async ({ markdown: md }) => {
+            setMarkdown(md)
+            await syncIndexFromMarkdown(md)
+            await syncPreviewFromMarkdown(md)
+          }}
+          onClose={() => setFindReplaceOpen(false)}
+        />
+      )}
+
+      {stylePanelOpen && filePath && (
+        <StyleOverridesPanel
+          overrides={styleDraft}
+          onSave={async ({ overrides }) => {
+            if (!window.markdoc) return
+            await window.markdoc.saveStyleOverrides({ documentPath: filePath, overrides })
+            const loaded = await window.markdoc.loadStyleOverrides(filePath)
+            setStyleOverrides(loaded)
+            setStyleDraft(overrides)
+            setStylePanelOpen(false)
+          }}
+          onReset={async () => {
+            if (!window.markdoc || !filePath) return
+            await window.markdoc.resetStyleOverrides(filePath)
+            setStyleOverrides({})
+            setStyleDraft({ version: 1 })
+            setStylePanelOpen(false)
+          }}
+          onClose={() => setStylePanelOpen(false)}
+        />
+      )}
+
+      {brokenImages.length > 0 && (
+        <div className="border-t border-[var(--status-warning)] bg-[var(--status-warning)]/10 px-3 py-1 text-[11px] text-[var(--status-warning)]">
+          {brokenImages.length} broken image reference(s) in this document
+        </div>
+      )}
+
+      {/* Export dialog */}
+      {exportOpen && (
+        <ExportDialog
+          editor={editorRef.current}
+          filePath={filePath}
+          onClose={() => setExportOpen(false)}
         />
       )}
     </div>

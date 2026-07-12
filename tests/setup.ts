@@ -1,5 +1,24 @@
 import '@testing-library/jest-dom/vitest'
 
+// Mermaid measures rendered SVG text via getBBox, which jsdom does not implement.
+const svgPrototype = SVGElement.prototype as SVGElement & {
+  getBBox?: () => DOMRect
+}
+if (typeof SVGElement !== 'undefined' && !svgPrototype.getBBox) {
+  svgPrototype.getBBox = () =>
+    ({
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 20,
+      top: 0,
+      right: 120,
+      bottom: 20,
+      left: 0,
+      toJSON: () => ({}),
+    }) as DOMRect
+}
+
 // Mock window.markdoc for component tests
 Object.defineProperty(window, 'markdoc', {
   writable: true,
@@ -16,6 +35,9 @@ Object.defineProperty(window, 'markdoc', {
       windowStates: [],
     }),
     setPreferences: async (prefs: Record<string, unknown>) => prefs,
+    getCliStatus: async () => ({ installed: false, installPath: null }),
+    installCli: async () => ({ success: true, installPath: '/usr/local/bin/markdoc' }),
+    uninstallCli: async () => ({ success: true }),
     onPreferencesChanged: () => () => {},
     getTheme: async () => ({ shouldUseDarkColors: false, appearance: 'system' }),
     onThemeChanged: () => () => {},

@@ -15,12 +15,18 @@ interface DocumentState {
   activeHeadingId: string | null
   collapsedOutlineIds: Set<string>
   wordCount: number
+  charCount: number
+  readingTimeMinutes: number
   documentTier: DocumentSizeTier
   largeDocModeDismissed: boolean
   preferences: AppPreferences
   searchOpen: boolean
+  findReplaceOpen: boolean
+  stylePanelOpen: boolean
   showSource: boolean
   styleOverrides: Record<string, string>
+  brokenImages: Array<{ src: string; line: number }>
+  highlightRange: { from: number; to: number } | null
 }
 
 interface DocumentActions {
@@ -37,12 +43,18 @@ interface DocumentActions {
   expandAllOutline: () => void
   collapseAllOutline: () => void
   setWordCount: (count: number) => void
+  setCharCount: (count: number) => void
+  setReadingTimeMinutes: (minutes: number) => void
   setDocumentTier: (tier: DocumentSizeTier) => void
   dismissLargeDocMode: () => void
   setPreferences: (prefs: Partial<AppPreferences>) => void
   setSearchOpen: (open: boolean) => void
+  setFindReplaceOpen: (open: boolean) => void
+  setStylePanelOpen: (open: boolean) => void
   setShowSource: (show: boolean) => void
   setStyleOverrides: (overrides: Record<string, string>) => void
+  setBrokenImages: (images: Array<{ src: string; line: number }>) => void
+  setHighlightRange: (range: { from: number; to: number } | null) => void
   reset: () => void
 }
 
@@ -58,12 +70,18 @@ const initialState: DocumentState = {
   activeHeadingId: null,
   collapsedOutlineIds: new Set(),
   wordCount: 0,
+  charCount: 0,
+  readingTimeMinutes: 1,
   documentTier: 'standard',
   largeDocModeDismissed: false,
   preferences: DEFAULT_PREFERENCES,
   searchOpen: false,
+  findReplaceOpen: false,
+  stylePanelOpen: false,
   showSource: false,
   styleOverrides: {},
+  brokenImages: [],
+  highlightRange: null,
 }
 
 /**
@@ -102,11 +120,17 @@ export const useDocumentStore = create<DocumentState & DocumentActions>((set) =>
       return { collapsedOutlineIds: allIds }
     }),
   setWordCount: (count) => set({ wordCount: count }),
+  setCharCount: (count) => set({ charCount: count }),
+  setReadingTimeMinutes: (minutes) => set({ readingTimeMinutes: minutes }),
   setDocumentTier: (tier) => set({ documentTier: tier, largeDocModeDismissed: false }),
   dismissLargeDocMode: () => set({ largeDocModeDismissed: true }),
   setPreferences: (prefs) => set((s) => ({ preferences: { ...s.preferences, ...prefs } })),
   setSearchOpen: (open) => set({ searchOpen: open }),
+  setFindReplaceOpen: (open) => set({ findReplaceOpen: open }),
+  setStylePanelOpen: (open) => set({ stylePanelOpen: open }),
   setShowSource: (show) => set({ showSource: show }),
   setStyleOverrides: (overrides) => set({ styleOverrides: overrides }),
+  setBrokenImages: (images) => set({ brokenImages: images }),
+  setHighlightRange: (range) => set({ highlightRange: range }),
   reset: () => set({ ...initialState, collapsedOutlineIds: new Set() }),
 }))

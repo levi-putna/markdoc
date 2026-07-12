@@ -12,6 +12,13 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { Markdown } from 'tiptap-markdown'
 import type { Extensions, NodeViewRenderer } from '@tiptap/core'
 import { lowlight } from './code-languages'
+import { FootnoteReference, FootnoteDefinition } from './extensions/footnote'
+import {
+  DefinitionList,
+  DefinitionItem,
+  DefinitionTerm,
+  DefinitionDescription,
+} from './extensions/definition-list'
 
 interface CreateTiptapExtensionsOptions {
   /**
@@ -21,6 +28,8 @@ interface CreateTiptapExtensionsOptions {
    * never mounts a real view, so it opts out to avoid pulling in React rendering.
    */
   codeBlockNodeView?: () => NodeViewRenderer
+  /** Override the default Image extension (live editor passes MarkdocImage). */
+  imageExtension?: Extensions[number]
 }
 
 /**
@@ -28,7 +37,10 @@ interface CreateTiptapExtensionsOptions {
  * Keeping this identical (bar the optional NodeView) prevents outline/preview
  * drift from extension mismatch.
  */
-export function createTiptapExtensions({ codeBlockNodeView }: CreateTiptapExtensionsOptions = {}): Extensions {
+export function createTiptapExtensions({
+  codeBlockNodeView,
+  imageExtension,
+}: CreateTiptapExtensionsOptions = {}): Extensions {
   let codeBlock = CodeBlockLowlight.configure({
     lowlight,
     HTMLAttributes: { class: 'code-block' },
@@ -43,13 +55,19 @@ export function createTiptapExtensions({ codeBlockNodeView }: CreateTiptapExtens
     codeBlock,
     Underline,
     Link.configure({ openOnClick: false }),
-    Image,
+    imageExtension ?? Image,
     Table.configure({ resizable: true }),
     TableRow,
     TableCell,
     TableHeader,
     TaskList,
     TaskItem.configure({ nested: true }),
+    FootnoteReference,
+    FootnoteDefinition,
+    DefinitionList,
+    DefinitionItem,
+    DefinitionTerm,
+    DefinitionDescription,
     Markdown.configure({
       html: true,
       transformPastedText: true,

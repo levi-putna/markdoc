@@ -8,6 +8,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -17,6 +18,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { flattenOutline } from '@shared/document-index'
+import { isValidDrop, projectDropDepth } from '@shared/outline-drag'
 import type { FlatOutlineItem, OutlineNode } from '@shared/types'
 import { useDocumentStore } from '../store/document-store'
 import { OutlineHeadingBadge } from './OutlineHeadingBadge'
@@ -26,9 +28,11 @@ interface OutlineSidebarProps {
   onReorder?: ({
     activeItem,
     overItem,
+    projectedDepth,
   }: {
     activeItem: FlatOutlineItem
     overItem: FlatOutlineItem
+    projectedDepth: number
   }) => void
 }
 
@@ -51,6 +55,8 @@ export function OutlineSidebar({ onJumpTo, onReorder }: OutlineSidebarProps) {
 
   const flatItems = flattenOutline(outline, { collapsedIds: collapsedOutlineIds })
   const didDragRef = useRef(false)
+  const dragDeltaXRef = useRef(0)
+  const liveRegionRef = useRef<HTMLDivElement>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -59,6 +65,11 @@ export function OutlineSidebar({ onJumpTo, onReorder }: OutlineSidebarProps) {
 
   const handleDragStart = () => {
     didDragRef.current = true
+    dragDeltaXRef.current = 0
+  }
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    dragDeltaXRef.current = event.delta.x
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -79,7 +90,22 @@ export function OutlineSidebar({ onJumpTo, onReorder }: OutlineSidebarProps) {
       return
     }
 
-    onReorder({ activeItem, overItem })
+    const projectedDepth = projectDropDepth({
+      activeDepth: activeItem.depth,
+      deltaX: dragDeltaXRef.current,
+    })
+
+    if (!isValidDrop({ activeItem, overItem, projectedDepth, flatItems })) {
+      requestAnimationFrame(() => {
+        didDragRef.current = false
+      })
+      return
+    }
+
+    onReorder({ activeItem, overItem, projectedDepth })
+    if (liveRegionRef.current) {
+      liveRegionRef.current.textContent = `Moved "${activeItem.text}" to level ${projectedDepth + 1}`
+    }
     requestAnimationFrame(() => {
       didDragRef.current = false
     })
@@ -130,6 +156,7 @@ export function OutlineSidebar({ onJumpTo, onReorder }: OutlineSidebarProps) {
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={flatItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
@@ -150,6 +177,8 @@ export function OutlineSidebar({ onJumpTo, onReorder }: OutlineSidebarProps) {
           </DndContext>
         )}
       </div>
+
+      <div ref={liveRegionRef} className="sr-only" aria-live="polite" />
 
       {/* Resize handle */}
       <div

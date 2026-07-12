@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "bodyColor": "#222222",
+  "bodyFontSize": "18px",
+  "headingColors": {
+    "h1": "#003366",
+    "h2": "#004488"
+  }
+}
