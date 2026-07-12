@@ -39,7 +39,13 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
             return utf8
         }
 
-        return String(decoding: data, as: Latin1.self)
+        // Latin-1 maps every byte 0x00-0xFF to a scalar, so this never
+        // actually fails for arbitrary bytes — the standard library has no
+        // bare `Latin1` Unicode encoding type (unlike `Unicode.ASCII`), so
+        // Foundation's `String.Encoding.isoLatin1` is the correct API here,
+        // not `String(decoding:as:)`. Falls back to a lossy UTF-8 decode
+        // (never fails) in the practically-impossible case this returns nil.
+        return String(data: data, encoding: .isoLatin1) ?? String(decoding: data, as: UTF8.self)
     }
 
     private func buildPreviewHTML(markdown: String) throws -> String {
