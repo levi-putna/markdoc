@@ -11,7 +11,6 @@ import { FindReplaceDialog } from './components/FindReplaceDialog'
 import { ImageInsertDialog } from './components/ImageInsertDialog'
 import { StyleOverridesPanel } from './components/StyleOverridesPanel'
 import { ExportDialog } from './components/ExportDialog'
-import { PreferencesPage } from './components/PreferencesPage'
 import { flattenOutline } from '@shared/document-index'
 import { findHeadingCharOffset } from '@shared/markdown-highlight'
 import { parseMarkdownAsync } from '@shared/markdown-async'
@@ -20,58 +19,13 @@ import {
 } from '@shared/outline-sync'
 import type { FlatOutlineItem } from '@shared/types'
 import type { StyleOverride, WindowState } from '@shared/ipc'
-
-/**
- * Applies the light/dark theme class from preferences + system appearance.
- * Shared by every window (document and preferences) so they stay in sync.
- */
-function useAppTheme() {
-  useEffect(() => {
-    const applyTheme = ({
-      shouldUseDarkColors,
-      appearance,
-    }: {
-      shouldUseDarkColors: boolean
-      appearance: string
-    }) => {
-      const isDark =
-        appearance === 'dark' || (appearance === 'system' && shouldUseDarkColors)
-      document.documentElement.classList.toggle('dark', isDark)
-    }
-
-    window.markdoc?.getTheme().then(applyTheme)
-
-    const unsubTheme = window.markdoc?.onThemeChanged(({ shouldUseDarkColors }) => {
-      const appearance = useDocumentStore.getState().preferences.appearance
-      applyTheme({ shouldUseDarkColors, appearance })
-    })
-    const unsubPrefs = window.markdoc?.onPreferencesChanged((prefs) => {
-      useDocumentStore.getState().setPreferences(prefs)
-      window.markdoc
-        ?.getTheme()
-        .then(({ shouldUseDarkColors }) =>
-          applyTheme({ shouldUseDarkColors, appearance: prefs.appearance })
-        )
-    })
-
-    return () => {
-      unsubTheme?.()
-      unsubPrefs?.()
-    }
-  }, [])
-}
+import { useAppTheme } from './hooks/use-app-theme'
 
 /**
  * Main document window layout composing toolbar, sidebar, editor, and preview.
  */
 export function App() {
-  const isPreferences = window.location.hash === '#/preferences'
-
   useAppTheme()
-
-  if (isPreferences) {
-    return <PreferencesPage />
-  }
 
   return <DocumentWindow />
 }

@@ -444,11 +444,25 @@ function createDocumentWindow({
 let preferencesWindow: BrowserWindow | null = null
 
 /**
+ * Loads the dedicated Preferences renderer into a window.
+ */
+function loadPreferencesWindow(win: BrowserWindow): void {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const baseUrl = process.env.ELECTRON_RENDERER_URL.replace(/\/$/, '')
+    void win.loadURL(`${baseUrl}/preferences.html`)
+  } else {
+    void win.loadFile(join(__dirname, '../renderer/preferences.html'))
+  }
+}
+
+/**
  * Opens the Preferences window.
  */
 function createPreferencesWindow(): void {
   if (preferencesWindow && !preferencesWindow.isDestroyed()) {
     preferencesWindow.focus()
+    // Re-load in case an older build pointed this window at the document shell.
+    loadPreferencesWindow(preferencesWindow)
     return
   }
 
@@ -474,13 +488,7 @@ function createPreferencesWindow(): void {
     preferencesWindow = null
   })
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    preferencesWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}#/preferences`)
-  } else {
-    preferencesWindow.loadFile(join(__dirname, '../renderer/index.html'), {
-      hash: 'preferences',
-    })
-  }
+  loadPreferencesWindow(preferencesWindow)
 }
 
 /**
