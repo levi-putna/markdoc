@@ -134,6 +134,7 @@
       "signIgnore": [
         "Contents/PlugIns/MarkDocQuickLook.appex"
       ],
+      "x64ArchFiles": "Contents/PlugIns/MarkDocQuickLook.appex/**",
       "extendInfo": {
         "CFBundleDocumentTypes": [
           {
