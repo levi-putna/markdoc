@@ -1,9 +1,11 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeTheme, Menu } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { readFile, writeFile, mkdir, access, unlink } from 'fs/promises'
 import { constants } from 'fs'
 import log from 'electron-log'
 import chokidar from 'chokidar'
+import icon from '../../resources/icon.png?asset'
 import { PreferencesStore } from './preferences-store'
 import {
   IPC_CHANNELS,
@@ -14,7 +16,7 @@ import {
   type ExportOptions,
 } from '../shared/ipc'
 import { parseMarkdownFile, serializeMarkdownFile } from '../shared/file-utils'
-import { checkForUpdates, REPO_RELEASES_URL } from './update-checker'
+import { checkForUpdatesManually, registerAutoUpdaterEvents, startBackgroundUpdateChecks } from './auto-updater'
 
 const preferencesStore = new PreferencesStore()
 
@@ -63,13 +65,20 @@ function configureAboutPanel(): void {
     applicationVersion: app.getVersion(),
     copyright: `Copyright © ${new Date().getFullYear()} MarkDoc`,
     credits: `Electron ${electron} · Chromium ${chrome} · Node ${node} · V8 ${v8}`,
+    // Without an explicit iconPath, macOS falls back to the generic
+    // Electron icon instead of MarkDoc's own — same reasoning as the
+    // Dock icon override below.
+    iconPath: icon,
   })
 }
 
 /**
- * Checks GitHub for a newer MarkDoc version and reports the outcome to the
- * user via a native dialog — whether an update is available, the app is
- * already up to date, or the check failed (e.g. no network connection).
+ * Checks for a newer MarkDoc version and reports the outcome to the user
+ * via a native dialog — whether an update is now downloading in the
+ * background, the app is already up to date, or the check failed (e.g. no
+ * network connection). In dev/unpackaged builds this always reports "up to
+ * date" without touching the network, since there's no update feed to
+ * check against.
  */
 async function checkForUpdatesAndNotify(win: BrowserWindow | null): Promise<void> {
   // showMessageBox's typings require the window argument to be omitted
@@ -77,34 +86,26 @@ async function checkForUpdatesAndNotify(win: BrowserWindow | null): Promise<void
   const showDialog = (options: Electron.MessageBoxOptions) =>
     win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
 
-  try {
-    const { currentVersion, latestVersion, isUpdateAvailable } = await checkForUpdates()
+  const result = await checkForUpdatesManually({ autoUpdater, isPackaged: app.isPackaged })
 
-    if (isUpdateAvailable) {
-      const { response } = await showDialog({
-        type: 'info',
-        buttons: ['View on GitHub', 'OK'],
-        defaultId: 0,
-        cancelId: 1,
-        message: 'A new version of MarkDoc is available',
-        detail: `Version ${latestVersion} is available — you're using ${currentVersion}.`,
-      })
-      if (response === 0) {
-        shell.openExternal(REPO_RELEASES_URL)
-      }
-    } else {
-      await showDialog({
-        type: 'info',
-        message: "You're up to date",
-        detail: `MarkDoc ${currentVersion} is the latest version.`,
-      })
-    }
-  } catch (error) {
-    log.error('Failed to check for updates', error)
+  if (result.status === 'update-available') {
+    await showDialog({
+      type: 'info',
+      message: 'A new version of MarkDoc is available',
+      detail: `Version ${result.version} is downloading in the background. You'll be prompted to restart once it's ready to install.`,
+    })
+  } else if (result.status === 'error') {
+    log.error('Failed to check for updates', result.error)
     await showDialog({
       type: 'error',
       message: 'Unable to check for updates',
       detail: 'Please check your internet connection and try again.',
+    })
+  } else {
+    await showDialog({
+      type: 'info',
+      message: "You're up to date",
+      detail: `MarkDoc ${app.getVersion()} is the latest version.`,
     })
   }
 }
@@ -289,6 +290,7 @@ function createDocumentWindow(filePath?: string): BrowserWindow {
     vibrancy: 'sidebar',
     visualEffectState: 'active',
     show: false,
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -361,6 +363,7 @@ function createPreferencesWindow(): void {
     height: 480,
     resizable: false,
     title: 'Preferences',
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -573,6 +576,12 @@ function processLaunchFiles(argv: string[]): string[] {
  * Application entry point.
  */
 function bootstrap(): void {
+  // Must run before any other app.* call — it's what makes the app menu,
+  // Dock, About panel, and OS-level process name (Activity Monitor, `ps`)
+  // read "MarkDoc" rather than falling back to the lowercase package.json
+  // "name" field or, in an unpackaged dev build, "Electron".
+  app.setName('MarkDoc')
+
   log.initialize()
   log.info('MarkDoc starting')
 
@@ -609,10 +618,28 @@ function bootstrap(): void {
   })
 
   app.whenReady().then(async () => {
+    // Packaged builds pick up build/icon.icns automatically; in dev the Dock
+    // otherwise shows the generic Electron icon, so set it explicitly.
+    if (process.platform === 'darwin' && !app.isPackaged) {
+      app.dock?.setIcon(icon)
+    }
+
     await preferencesStore.load()
     configureAboutPanel()
     createApplicationMenu()
     registerIpcHandlers()
+
+    // Real auto-update: silently checks/downloads in the background and
+    // only ever prompts once a download is ready (TR-6.6). No-op in
+    // dev/unpackaged builds. See src/main/auto-updater.ts for policy.
+    registerAutoUpdaterEvents({
+      autoUpdater,
+      dialog,
+      logger: log,
+      getWindows: () => [...windows.values()],
+      isPackaged: app.isPackaged,
+    })
+    startBackgroundUpdateChecks({ autoUpdater, logger: log, isPackaged: app.isPackaged })
 
     nativeTheme.on('updated', () => {
       for (const win of windows.values()) {

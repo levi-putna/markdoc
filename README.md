@@ -80,7 +80,7 @@ yarn build
 
 ### Package for macOS
 
-Creates a signed `.app` bundle and `.dmg` in `release/` (requires code-signing certificates for distribution):
+Creates a signed `.app` bundle and `.dmg` in `release/` (requires code-signing certificates for distribution). The packaged app includes a Quick Look extension so Finder can render Markdown previews when you press Space.
 
 ```bash
 yarn package
@@ -91,6 +91,55 @@ Alias:
 ```bash
 yarn dist
 ```
+
+### Quick Look preview (Finder Spacebar)
+
+MarkDoc embeds a native Quick Look extension that renders `.md`, `.markdown`, `.mdown`, and `.mkd` files as formatted HTML in Finder.
+
+**Build prerequisites**
+
+- Full **Xcode** (not Command Line Tools alone) — `xcodebuild` is required
+- **XcodeGen** — install with `brew install xcodegen` (the build script can also download a prebuilt binary automatically)
+
+`yarn package` builds the extension automatically via `yarn build:quicklook` and embeds it into `MarkDoc.app/Contents/PlugIns/`.
+
+**After installing the packaged app**
+
+1. Move `MarkDoc.app` to `/Applications` and launch it once.
+2. Register the extension (usually only needed once per install):
+
+   ```bash
+   pluginkit -a /Applications/MarkDoc.app/Contents/PlugIns/MarkDocQuickLook.appex
+   qlmanage -r && qlmanage -r cache
+   killall Finder
+   ```
+
+3. Select a Markdown file in Finder and press **Space** to preview.
+
+**Troubleshooting**
+
+- Preview still shows raw text: run `pluginkit -m -p com.apple.quicklook.preview | grep markdoc` to confirm registration; re-run the `pluginkit -a` commands above.
+- Fast local test without Finder: `qlmanage -p /path/to/file.md`
+- Build only the extension: `yarn build:quicklook`
+
+### Releasing an update
+
+MarkDoc auto-updates itself (see `src/main/auto-updater.ts`) using [`electron-updater`](https://www.electron.build/auto-update), fed from this repository's [GitHub Releases](https://github.com/levi-putna/markdoc/releases) — no separate update server is needed. Every packaged, running copy of the app periodically checks the latest GitHub Release, downloads it in the background if it's newer, and prompts the user to restart once it's ready (never while a document has unsaved changes — see `TR-14.3`).
+
+To cut a release:
+
+1. Bump `"version"` in `package.json` (auto-update compares against this).
+2. Create a [GitHub personal access token](https://github.com/settings/tokens) with `repo` scope and export it as `GH_TOKEN`.
+3. Build, sign/notarize, and publish in one step:
+
+   ```bash
+   GH_TOKEN=ghp_xxx yarn release
+   ```
+
+   This runs `electron-builder --mac --publish always`, which uploads the `.dmg`, `.zip`, and the `latest-mac.yml` update manifest to a new (initially draft) GitHub Release tagged `vX.Y.Z`.
+4. Publish the draft release on GitHub once you're happy with it. Existing installs will pick it up on their next background check (or immediately via **MarkDoc → Check for Updates…**).
+
+Auto-update requires the app to be properly code-signed and notarized (`TR-6.3`/`TR-6.4`) — an unsigned build can't verify a signed update (and vice versa), so mixing signed and ad-hoc builds across versions will break updating for anyone on the ad-hoc build.
 
 ## CLI helper
 
@@ -124,6 +173,7 @@ tests/
   e2e/            Playwright Electron integration tests
   fixtures/       Test documents and performance corpus
 build/            macOS entitlements and packaging resources
+macos/            Quick Look preview extension (Swift)
 ```
 
 ## Documentation

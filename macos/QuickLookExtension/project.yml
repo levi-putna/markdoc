@@ -1,0 +1,24 @@
+name: MarkDocQuickLook
+options:
+  bundleIdPrefix: com.markdoc.app
+  deploymentTarget:
+    macOS: "12.0"
+  createIntermediateGroups: true
+
+targets:
+  MarkDocQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.markdoc.app.quicklook
+        PRODUCT_NAME: MarkDocQuickLook
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Sources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ../../build/entitlements.quicklook.plist
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "5.9"

@@ -1,5 +1,6 @@
 {
   "name": "markdoc",
+  "productName": "MarkDoc",
   "version": "0.1.0",
   "description": "A native macOS Markdown editor built with Electron and Tiptap",
   "main": "./out/main/index.js",
@@ -10,8 +11,10 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package": "yarn build && electron-builder --mac",
+    "build:quicklook": "bash macos/scripts/build-quicklook.sh",
+    "package": "yarn build && yarn build:quicklook && electron-builder --mac",
     "dist": "yarn package",
+    "release": "yarn build && yarn build:quicklook && electron-builder --mac --publish always",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\" \"tests/**/*.{ts,tsx}\"",
@@ -46,6 +49,7 @@
     "docx": "^9.2.0",
     "dompurify": "^3.2.4",
     "electron-log": "^5.3.0",
+    "electron-updater": "^6.8.9",
     "gray-matter": "^4.0.3",
     "hast-util-to-html": "^9.0.5",
     "highlight.js": "^11.11.1",
@@ -91,13 +95,20 @@
   "build": {
     "appId": "com.markdoc.app",
     "productName": "MarkDoc",
+    "afterPack": "scripts/after-pack.js",
     "directories": {
       "output": "release"
     },
     "files": [
       "out/**/*",
-      "cli/**/*"
+      "cli/**/*",
+      "resources/**/*"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "levi-putna",
+      "repo": "markdoc"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
@@ -108,28 +119,44 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "fileAssociations": [
-        {
-          "ext": "md",
-          "name": "Markdown Document",
-          "role": "Editor"
-        },
-        {
-          "ext": "markdown",
-          "name": "Markdown Document",
-          "role": "Editor"
-        },
-        {
-          "ext": "mdown",
-          "name": "Markdown Document",
-          "role": "Editor"
-        },
-        {
-          "ext": "mkd",
-          "name": "Markdown Document",
-          "role": "Editor"
-        }
-      ]
+      "signIgnore": [
+        "Contents/PlugIns/MarkDocQuickLook.appex"
+      ],
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Markdown Document",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Default",
+            "LSItemContentTypes": [
+              "net.daringfireball.markdown"
+            ],
+            "CFBundleTypeExtensions": [
+              "md",
+              "markdown",
+              "mdown",
+              "mkd"
+            ]
+          }
+        ],
+        "UTExportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "net.daringfireball.markdown",
+            "UTTypeDescription": "Markdown Document",
+            "UTTypeConformsTo": [
+              "public.plain-text"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "md",
+                "markdown",
+                "mdown",
+                "mkd"
+              ]
+            }
+          }
+        ]
+      }
     }
   }
 }

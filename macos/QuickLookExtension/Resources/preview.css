@@ -1,0 +1,178 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --text: #1f2328;
+  --text-secondary: #656d76;
+  --border: #d0d7de;
+  --code-bg: #f6f8fa;
+  --link: #0969da;
+  --blockquote-border: #d0d7de;
+  --table-stripe: #f6f8fa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --text: #e6edf3;
+    --text-secondary: #8b949e;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --link: #4493f8;
+    --blockquote-border: #30363d;
+    --table-stripe: #161b22;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  padding: 24px 28px 32px;
+}
+
+#content {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+#content h1,
+#content h2,
+#content h3,
+#content h4,
+#content h5,
+#content h6 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+#content h1 {
+  font-size: 1.75em;
+  margin-top: 0;
+}
+
+#content h2 {
+  font-size: 1.4em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+
+#content h3 {
+  font-size: 1.2em;
+}
+
+#content p {
+  margin: 0 0 1em;
+}
+
+#content a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+#content a:hover {
+  text-decoration: underline;
+}
+
+#content ul,
+#content ol {
+  margin: 0 0 1em;
+  padding-left: 1.5em;
+}
+
+#content li {
+  margin: 0.25em 0;
+}
+
+#content blockquote {
+  margin: 1em 0;
+  padding: 0 1em;
+  color: var(--text-secondary);
+  border-left: 4px solid var(--blockquote-border);
+}
+
+#content code {
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+}
+
+#content pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+#content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+}
+
+#content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+
+#content th,
+#content td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+#content th {
+  background: var(--code-bg);
+  font-weight: 600;
+}
+
+#content tr:nth-child(even) td {
+  background: var(--table-stripe);
+}
+
+#content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+#content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+#content .task-list-item {
+  list-style-type: none;
+  margin-left: -1.5em;
+}
+
+#content .task-list-item input {
+  margin-right: 0.5em;
+}
+
+#content .contains-task-list {
+  padding-left: 0;
+}

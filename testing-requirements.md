@@ -244,6 +244,18 @@ Each row is a representative test case; area codes map to `functional-requiremen
 | TC-PREFS.3 | Toggling the appearance override (system / light / dark) updates all open windows' theme immediately. | Integration |
 | TC-PREFS.4 | Installing/uninstalling the CLI helper from Preferences (FR-6.2) is reflected correctly in a subsequent `markdoc` invocation from a fresh shell. | Manual (Section 3.5) — shell `$PATH` propagation is impractical to assert reliably in CI |
 
+**Auto-Update (`TC-UPDATE`) — verifies `technical-requirements.md` TR-6.6, TR-14.3**
+
+| ID | Test Case | Level |
+|----|-----------|-------|
+| TC-UPDATE.1 | `canInstallUpdate` returns `false` if any open document window has unsaved changes, `true` otherwise (including zero open windows). | Unit |
+| TC-UPDATE.2 | On `update-downloaded`, if every window is clean, the user is prompted to restart; choosing "Restart Now" calls `quitAndInstall`, choosing "Later" does not. | Unit (fake `autoUpdater`/`dialog`) |
+| TC-UPDATE.3 | On `update-downloaded`, if any window has unsaved changes, no dialog is shown and `quitAndInstall` is never called — installation is silently deferred to the next clean quit (TR-14.3). | Unit |
+| TC-UPDATE.4 | If a document becomes dirty while the restart-confirmation dialog is open, `quitAndInstall` is *not* called even if the user already clicked "Restart Now" — safety is re-checked immediately before installing. | Unit |
+| TC-UPDATE.5 | Background update checks never run in an unpackaged (dev) build, and never throw/reject unhandled when a check fails (network offline, feed unreachable). | Unit |
+| TC-UPDATE.6 | The "Check for Updates…" menu action reports "up to date", "update available", or an error dialog matching the real outcome of the check. | Unit (`checkForUpdatesManually`) |
+| TC-UPDATE.7 | End-to-end update round trip: install an old signed/notarized build, publish a newer signed/notarized test release to a scratch GitHub repo (or the real repo's pre-release channel), confirm the running app downloads, prompts, and relaunches on the new version. | Manual (Section 3.5) — requires real code-signing/notarization and a real release artifact; not practical in CI |
+
 **Performance & Large Documents (`TC-PERF`) — verifies FR-2.12, `technical-requirements.md` Section 13**
 
 | ID | Test Case | Level |
@@ -274,6 +286,7 @@ Items that are impractical or low-value to fully automate, to be walked through 
 - Visual/interaction check of the header toolbar: window is draggable from empty toolbar space, traffic-light controls sit correctly against the inset title bar, and the sidebar toggle/view segmented control/search icon look and feel consistent with native macOS toolbar conventions (not like an embedded web page).
 - Design conformance pass against `design-guide.md`: typography scale, colour tokens, spacing/icon sizing, sidebar row metrics, syntax-reveal-on-cursor-line behaviour (FR-2.2a), and motion durations match the guide in both light and dark mode.
 - Install a downloaded, notarized build on a clean machine (no dev certificates installed) and confirm no Gatekeeper warning appears.
+- Auto-update dry run (TC-UPDATE.7): install the previous release, publish the new one via `yarn release`, and confirm the running app finds it, downloads it in the background, and successfully restarts into the new version. Also confirm that starting the restart prompt while a document has unsaved changes does *not* offer to install until the document is saved or closed.
 - Visual inspection of one exported PDF and one exported DOCX file opened in Preview.app and Microsoft Word/Pages respectively, confirming they look correct to a human, not just structurally correct to an automated parser.
 
 ### 3.6 Release Exit Criteria

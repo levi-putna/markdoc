@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Markdown Preview</title>
+    <link rel="stylesheet" href="preview.css" />
+  </head>
+  <body>
+    <article id="content"></article>
+    <script src="markdown-it.min.js"></script>
+    <script src="markdown-it-task-lists.min.js"></script>
+    <script>
+      (function () {
+        var source = /*__MARKDOWN_SOURCE__*/ '';
+        var content = document.getElementById('content');
+
+        if (!source || !window.markdownit) {
+          content.textContent = source || '';
+          return;
+        }
+
+        var md = window.markdownit({
+          html: false,
+          linkify: true,
+          breaks: true,
+        });
+
+        if (window.markdownitTaskLists) {
+          md.use(window.markdownitTaskLists, { enabled: true, label: true });
+        }
+
+        content.innerHTML = md.render(source);
+      })();
+    </script>
+  </body>
+</html>
