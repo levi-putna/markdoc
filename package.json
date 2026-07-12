@@ -1,7 +1,7 @@
 {
   "name": "markdoc",
   "productName": "MarkDoc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A native macOS Markdown editor built with Electron and Tiptap",
   "main": "./out/main/index.js",
   "author": "MarkDoc",

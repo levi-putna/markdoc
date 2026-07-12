@@ -45,6 +45,24 @@ export default [
     },
   },
   {
+    // Node-context config/build scripts (electron-builder hooks, PostCSS
+    // config, this file itself) — plain `.js`, run directly by Node rather
+    // than bundled, so they need Node's CommonJS globals rather than the
+    // browser/Electron-renderer globals declared above for .ts/.tsx.
+    files: ['**/*.js'],
+    languageOptions: {
+      globals: {
+        require: 'readonly',
+        module: 'writable',
+        exports: 'writable',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
+  {
     ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**'],
   },
 ]
