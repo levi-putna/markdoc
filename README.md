@@ -130,14 +130,15 @@ To cut a release:
 
 1. Bump `"version"` in `package.json` (auto-update compares against this).
 2. Create a [GitHub personal access token](https://github.com/settings/tokens) with `repo` scope and export it as `GH_TOKEN`.
-3. Build, sign/notarize, and publish in one step:
+3. Export signing/notarization credentials: `CSC_LINK` (path to your Developer ID Application `.p12`), `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` — read automatically by `electron-builder`/`@electron/notarize`. **Also export `QUICKLOOK_SIGN_IDENTITY`** (e.g. `"Developer ID Application: Your Name (TEAMID)"`) **and `QUICKLOOK_TEAM_ID`** — consumed separately by `macos/scripts/build-quicklook.sh`. Without these two, the Quick Look extension silently falls back to ad-hoc signing, which passes locally but **fails notarization** (no Developer ID cert, no secure timestamp, retains the `get-task-allow` debug entitlement) — this only surfaces at the very end of the build, after Apple's notarization round-trip.
+4. Build, sign/notarize, and publish in one step:
 
    ```bash
    GH_TOKEN=ghp_xxx yarn release
    ```
 
    This runs `electron-builder --mac --publish always`, which uploads the `.dmg`, `.zip`, and the `latest-mac.yml` update manifest to a new (initially draft) GitHub Release tagged `vX.Y.Z`.
-4. Publish the draft release on GitHub once you're happy with it. Existing installs will pick it up on their next background check (or immediately via **MarkDoc → Check for Updates…**).
+5. Publish the draft release on GitHub once you're happy with it. Existing installs will pick it up on their next background check (or immediately via **MarkDoc → Check for Updates…**).
 
 Auto-update requires the app to be properly code-signed and notarized (`TR-6.3`/`TR-6.4`) — an unsigned build can't verify a signed update (and vice versa), so mixing signed and ad-hoc builds across versions will break updating for anyone on the ad-hoc build.
 
