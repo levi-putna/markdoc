@@ -17,7 +17,15 @@ import {
   type FileOperationResult,
   type StyleOverride,
   type WindowState,
+  type ChatSendPayload,
+  type ChatStreamChunk,
+  type AiKeyTestResult,
+  type AiModelsListResult,
+  type AutocompleteRequestPayload,
+  type AutocompleteResultPayload,
 } from '../shared/ipc'
+import type { UIMessage } from 'ai'
+import type { ConversationSummary, SuggestionDecorationPayload } from '../shared/ai/types'
 
 /**
  * Buffers `file:open-path` requests that arrive before the renderer has
@@ -279,6 +287,182 @@ const markdocApi = {
 
   copyDiagnostics: (): Promise<string> =>
     ipcRenderer.invoke(IPC_CHANNELS.COPY_DIAGNOSTICS),
+
+  openPreferences: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_PREFERENCES),
+
+  openExternal: ({ url }: { url: string }): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_EXTERNAL, { url }),
+
+  sendChat: (payload: ChatSendPayload): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CHAT_SEND, payload),
+
+  cancelChat: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CHAT_CANCEL),
+
+  onChatStreamChunk: (callback: (chunk: ChatStreamChunk) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: ChatStreamChunk) => callback(chunk)
+    ipcRenderer.on(IPC_CHANNELS.AI_CHAT_STREAM_CHUNK, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_CHAT_STREAM_CHUNK, handler)
+  },
+
+  getConversation: ({
+    filePath,
+    sessionId,
+  }: {
+    filePath: string | null
+    sessionId: string
+  }): Promise<{ conversationId: string; title: string; messages: UIMessage[] }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_GET, { filePath, sessionId }),
+
+  listConversations: ({
+    filePath,
+    sessionId,
+  }: {
+    filePath: string | null
+    sessionId: string
+  }): Promise<{ conversations: ConversationSummary[] }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_LIST, { filePath, sessionId }),
+
+  loadConversation: ({
+    filePath,
+    sessionId,
+    conversationId,
+  }: {
+    filePath: string | null
+    sessionId: string
+    conversationId: string
+  }): Promise<{ conversationId: string; title: string; messages: UIMessage[] }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_LOAD, { filePath, sessionId, conversationId }),
+
+  saveConversation: ({
+    filePath,
+    sessionId,
+    conversationId,
+    messages,
+  }: {
+    filePath: string | null
+    sessionId: string
+    conversationId: string
+    messages: UIMessage[]
+  }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_SAVE, {
+      filePath,
+      sessionId,
+      conversationId,
+      messages,
+    }),
+
+  startNewConversation: ({
+    filePath,
+    sessionId,
+  }: {
+    filePath: string | null
+    sessionId: string
+  }): Promise<{ conversationId: string; title: string; messages: UIMessage[] }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_START_NEW, { filePath, sessionId }),
+
+  clearConversation: ({
+    filePath,
+    sessionId,
+  }: {
+    filePath: string | null
+    sessionId: string
+  }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_CLEAR, { filePath, sessionId }),
+
+  onConversationsChanged: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on(IPC_CHANNELS.AI_CONVERSATIONS_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_CONVERSATIONS_CHANGED, handler)
+  },
+
+  clearAllConversations: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_CONVERSATIONS_CLEAR_ALL),
+
+  listAiModels: (): Promise<AiModelsListResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_MODELS_LIST),
+
+  setAiApiKey: ({ apiKey }: { apiKey: string }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_KEY_SET, { apiKey }),
+
+  testAiApiKey: ({ apiKey }: { apiKey?: string }): Promise<AiKeyTestResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_KEY_TEST, { apiKey }),
+
+  clearAiApiKey: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_KEY_CLEAR),
+
+  hasAiApiKey: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.AI_KEY_HAS),
+
+  onSuggestionApply: (
+    callback: (payload: SuggestionDecorationPayload & { autoApply?: boolean }) => void
+  ): (() => void) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      payload: SuggestionDecorationPayload & { autoApply?: boolean }
+    ) => callback(payload)
+    ipcRenderer.on(IPC_CHANNELS.AI_SUGGESTION_APPLY, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_SUGGESTION_APPLY, handler)
+  },
+
+  acceptSuggestion: (payload: { suggestionId: string }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_SUGGESTION_ACCEPT, payload),
+
+  rejectSuggestion: (payload: { suggestionId: string }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_SUGGESTION_REJECT, payload),
+
+  acceptAllSuggestions: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_SUGGESTION_ACCEPT_ALL),
+
+  rejectAllSuggestions: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_SUGGESTION_REJECT_ALL),
+
+  onSuggestionAccept: (
+    callback: (payload: { suggestionId: string }) => void
+  ): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, payload: { suggestionId: string }) =>
+      callback(payload)
+    ipcRenderer.on(IPC_CHANNELS.AI_SUGGESTION_ACCEPT, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_SUGGESTION_ACCEPT, handler)
+  },
+
+  onSuggestionReject: (
+    callback: (payload: { suggestionId: string }) => void
+  ): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, payload: { suggestionId: string }) =>
+      callback(payload)
+    ipcRenderer.on(IPC_CHANNELS.AI_SUGGESTION_REJECT, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_SUGGESTION_REJECT, handler)
+  },
+
+  onSuggestionAcceptAll: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on(IPC_CHANNELS.AI_SUGGESTION_ACCEPT_ALL, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_SUGGESTION_ACCEPT_ALL, handler)
+  },
+
+  onSuggestionRejectAll: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on(IPC_CHANNELS.AI_SUGGESTION_REJECT_ALL, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_SUGGESTION_REJECT_ALL, handler)
+  },
+
+  requestAutocomplete: ({
+    requestId,
+    ...payload
+  }: AutocompleteRequestPayload & { requestId: string }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_AUTOCOMPLETE_REQUEST, { requestId, ...payload }),
+
+  cancelAutocomplete: ({ requestId }: { requestId: string }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AI_AUTOCOMPLETE_CANCEL, { requestId }),
+
+  onAutocompleteResult: (
+    callback: (payload: AutocompleteResultPayload) => void
+  ): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, payload: AutocompleteResultPayload) =>
+      callback(payload)
+    ipcRenderer.on(IPC_CHANNELS.AI_AUTOCOMPLETE_RESULT, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AI_AUTOCOMPLETE_RESULT, handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('markdoc', markdocApi)

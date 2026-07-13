@@ -4,7 +4,7 @@
 
 MarkDoc is a macOS desktop application for authoring, previewing, and exporting Markdown documents. It is a local-first editor — no accounts, no sync services, no cloud dependency — built with **Electron** and packaged as a native macOS app bundle so it still integrates with Finder, the Dock, native menus, and the Terminal like any other Mac app, even though its UI is implemented with web technologies.
 
-This document describes the **functional requirements** (what the app must do). See [`technical-requirements.md`](./technical-requirements.md) for the architecture, technology stack, data formats, and detailed non-functional/technical specifications that implement these requirements; [`design-guide.md`](./design-guide.md) for the visual/interaction design language (typography, colour, layout, native chrome, and how to achieve it in Tiptap) that these requirements should look like in practice; and [`testing-requirements.md`](./testing-requirements.md) for how the app will be verified against them.
+This document describes the **functional requirements** (what the app must do). See [`technical-requirements.md`](./technical-requirements.md) for the architecture, technology stack, data formats, and detailed non-functional/technical specifications that implement these requirements; [`design-guide.md`](./design-guide.md) for the visual/interaction design language (typography, colour, layout, native chrome, and how to achieve it in Tiptap) that these requirements should look like in practice; and [`testing-requirements.md`](./testing-requirements.md) for how the app will be verified against them. **AI-assisted writing** (opt-in, Vercel AI Gateway) is specified in Section 18.
 
 ---
 
@@ -211,7 +211,7 @@ Several requirements above imply user-configurable settings but don't specify wh
 
 | ID | Requirement |
 |----|-------------|
-| FR-13.1 | A Preferences window must expose: editor font family/size/line-spacing (FR-2.9), spellcheck on/off (FR-2.11), appearance override (system-follow vs. force light/dark, in addition to the automatic behavior in FR-1.6), sidebar row density (`design-guide.md` Section 8), and CLI helper install/uninstall (FR-6.2). |
+| FR-13.1 | A Preferences window must expose: editor font family/size/line-spacing (FR-2.9), spellcheck on/off (FR-2.11), appearance override (system-follow vs. force light/dark, in addition to the automatic behavior in FR-1.6), sidebar row density (`design-guide.md` Section 8), CLI helper install/uninstall (FR-6.2), and **AI settings** (FR-14.1–FR-14.3): master AI toggle, Vercel AI Gateway API key management, enabled-model catalogue, default models for the assistant and inline autocomplete, optional AI debug log, and clear-all conversation history. |
 | FR-13.2 | Preferences are global (app-wide), stored per `technical-requirements.md` TR-4.4 — distinct from per-document style overrides (Section 10), which remain scoped to an individual document via its sidecar file. |
 | FR-13.3 | Preference changes must apply immediately to all open documents/windows without requiring an app restart. |
 | FR-13.4 | The Preferences window itself follows standard macOS conventions (a single window, opened via the app menu and ⌘,, closed via ⌘W/Esc) rather than being a custom in-content settings panel. |
@@ -226,7 +226,7 @@ These are product-level expectations; see `technical-requirements.md` (Sections 
 - **Data safety:** No data loss on crash; autosave/recovery of unsaved changes; Markdown round-trip (edit → save → reopen) must be lossless.
 - **Accessibility:** VoiceOver support, Dynamic Type-friendly UI where feasible, full keyboard navigability.
 - **Localization:** English at launch; architecture should not preclude future localization.
-- **Privacy:** Fully local/offline; no telemetry or document content leaves the device unless the user explicitly exports/shares it.
+- **Privacy:** Fully local/offline for core editing; no telemetry or document content leaves the device unless the user explicitly exports/shares it. **Opt-in AI features** (Section 18) send document excerpts and conversation to [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) only after the user enables AI and provides their own API key.
 - **Distribution & signing:** Code-signed and notarized so the app launches without Gatekeeper warnings when distributed outside the Mac App Store.
 
 ---
@@ -243,10 +243,105 @@ To keep the initial release focused, the following are explicitly **not** requir
 - Finder Quick Look (spacebar preview) integration — deferred: it requires a small native macOS extension bundle alongside the Electron app, which is disproportionate native-packaging complexity for a v1 feature. Revisit post-v1.
 - Services menu / Share sheet integration.
 - Welcome/Recent-Files launch screen (FR-1.8 resolves this to "open a blank document immediately" for v1).
+- **Local model providers** (Ollama, LM Studio, etc.) for AI — v1 uses Vercel AI Gateway only (Section 18); BYOK via Vercel is the supported path for provider keys.
+- Built-in AI credit top-up or billing inside MarkDoc — users manage credits on Vercel.
+- Multi-file AI agent that edits an entire vault without explicit per-document scope.
 
 ---
 
-## 17. Open Questions
+## 18. AI-Assisted Writing
+
+MarkDoc provides **opt-in** AI features powered by the [Vercel AI SDK](https://sdk.vercel.ai/) and [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). **AI is off by default.** No AI UI is shown and no network requests are made to AI providers until the user explicitly enables AI and supplies a Vercel AI Gateway API key.
+
+Promoted from [`ideas/ai-assisted/ai-document-assistant.md`](./ideas/ai-assisted/ai-document-assistant.md) and [`ideas/ai-assisted/ai-inline-autocomplete.md`](./ideas/ai-assisted/ai-inline-autocomplete.md).
+
+### 18.1 Activation, privacy & settings
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.1 | **AI master toggle** in Preferences: **off by default**. When off, the assistant panel, inline autocomplete, and all AI network requests are disabled. |
+| FR-14.2 | When AI is enabled, the user must provide a **Vercel AI Gateway API key**, stored in the macOS Keychain (or equivalent secure credential store) — never in plain-text preferences on disk. |
+| FR-14.3 | Before the first AI request, MarkDoc must show a disclosure explaining what content is sent to the gateway, with a link to Vercel AI Gateway pricing, and require explicit confirmation. |
+| FR-14.4 | Preferences must expose a **model catalogue** sourced from the gateway (`GET /v1/models` or AI SDK model discovery). The user selects which models appear in in-app model pickers. |
+| FR-14.5 | MarkDoc must ship a **default enabled set of 8 models** — a curated mix of flagship, reasoning, and fast/cheap options — which the user can add to or remove from at any time. |
+| FR-14.6 | The user must be able to set a **default model** for the document assistant and (optionally) a separate default for inline autocomplete. |
+| FR-14.7 | Model pickers must show a **lightweight cost indicator** ($ / $$ / $$$) derived from gateway pricing, with an optional tooltip showing approximate input/output cost per 1M tokens. |
+| FR-14.8 | An optional **local-only AI debug log** (clearable from Preferences) may record request metadata and errors; it must never be transmitted off-device automatically. |
+
+### 18.2 Document assistant (side panel)
+
+The **document assistant** is a Cursor-style conversational panel for asking questions about, and requesting edits to, the active document. The assistant UI is built with [AI Elements](https://elements.ai-sdk.dev/) components, integrated with `@ai-sdk/react`.
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.9 | The assistant panel docks on the **right** side of the document window, **collapsible** and **resizable** with the same interaction model as the left outline sidebar (drag handle, min/max width, persisted per window). |
+| FR-14.10 | The user must be able to show/hide the assistant via **View → Assistant**, a toolbar control, and a keyboard shortcut. |
+| FR-14.11 | The panel must use AI Elements **[`Conversation`](https://elements.ai-sdk.dev/components/conversation)** (thread, auto-scroll, scroll-to-bottom button) and **[`PromptInput`](https://elements.ai-sdk.dev/components/prompt-input)** (composer, submit, model selector in footer). |
+| FR-14.12 | When the user queues prompts while a response is in progress, pending items must be shown with AI Elements **[`Queue`](https://elements.ai-sdk.dev/components/queue)** — collapsible sections listing queued, in-progress, and completed prompt items. |
+| FR-14.13 | Tool-call activity and loading/streaming states must use AI Elements **[`Shimmer`](https://elements.ai-sdk.dev/components/shimmer)** (or equivalent AI Elements loading primitives) so in-flight work is visually distinct from completed messages. |
+| FR-14.14 | The panel must show: conversation thread, composer, model selector (enabled models only), **edit-mode toggle** (Suggestion / Auto), and a clear indicator when AI is active. |
+| FR-14.15 | When AI is disabled or no gateway key is configured, the panel must show an empty state with a link to Preferences — not a broken chat UI. |
+| FR-14.16 | **New / empty conversation** must show contextual **suggested prompts** (tap to send), adapting to document state: full-document prompts ("Summarise this document", "Add a one-paragraph summary at the top", "What are the main points?", "Suggest improvements"), selection-based prompts when text is selected ("Summarise selection", "Rewrite", "Expand", "Fix grammar", "Make more formal/concise"), and empty-document prompts ("Help me outline this document"). |
+| FR-14.17 | With text selected, a context-menu action **Ask Assistant** must open or focus the assistant panel with the selection attached as context. |
+
+### 18.3 Conversation & document-scoped history
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.18 | Assistant conversations are **scoped to the active document only**. Switching to a different document loads that document's conversation history; there is no shared cross-document thread in v1. |
+| FR-14.19 | Conversation history must be **persisted locally** in Application Support (not committed to git), keyed by the document's file path (and a session identifier for unsaved untitled documents). |
+| FR-14.20 | The user must be able to start a **new conversation** for the current document (clearing the visible thread) and delete conversation history per document or clear all AI history from Preferences. |
+| FR-14.21 | Assistant responses must **stream** into the conversation thread. Tool activity (e.g. "Reading document…", "Proposing edit…") must be visible as collapsible status in the thread. |
+| FR-14.22 | When context exceeds model token limits, older messages may be truncated or summarised with a visible notice in the thread. |
+
+### 18.4 Assistant agent, tools & heading references
+
+The assistant runs as an **agent** with tool use via the Vercel AI SDK. Tool execution and gateway requests happen in the Electron **main process** (or a dedicated worker) — the API key must never be exposed to the renderer.
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.23 | The assistant must support read tools: **`read_document`** (full markdown or section/range), **`read_selection`** (current selection + context), **`read_outline`** (heading hierarchy), and **`search_document`** (text/regex find within the document). Reads must reflect the **current unsaved buffer**, not only the on-disk file. |
+| FR-14.24 | The assistant must support write tools: **`propose_edit`** (Suggestion mode) and **`apply_edit`** (Auto mode), each accepting a target range or section, replacement markdown, and optional rationale. |
+| FR-14.25 | Write tools must not run when the document is read-only. |
+| FR-14.26 | Tool calls must be **visible in the conversation thread** (collapsible): tool name, brief summary, and a navigable link to the affected document region where applicable. |
+| FR-14.27 | The assistant and its messages may include **heading reference tokens** (e.g. a stable `heading://` URI or slug derived from the document index) that render as inline links in the conversation. **Clicking a heading reference must scroll/jump the editor** (and preview, if visible) to that heading — the same behaviour as clicking an outline node (FR-4.2). |
+| FR-14.28 | Document-level and selection-level tasks (summarise, rewrite, expand, fix grammar, change tone, TL;DR, frontmatter summary) are handled **via assistant prompts and write tools**, not separate menu commands or preview sheets. |
+
+### 18.5 Edit modes: Suggestion vs Auto (Cursor-style changes)
+
+Inspired by Cursor's review-before-apply workflow: the assistant can propose document changes either as **reviewable suggestions** or **immediate edits**.
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.29 | **Suggestion mode (default):** write tools produce **track-changes-style** proposals in the editor — insertions and deletions visually distinct from committed text (e.g. green/red highlight, underline/strikethrough). The user reviews in the document, not in a separate preview sheet. |
+| FR-14.30 | Each suggestion must be **independently actionable**: Accept, Reject, Accept all, or Reject all — from the assistant thread, editor gutter, or a dedicated suggestions bar. |
+| FR-14.31 | Accepting a suggestion merges it into the document; rejecting removes the proposal with no document change. |
+| FR-14.32 | **Auto mode:** write tools apply changes immediately to the document buffer with markdown-aware merge (preserve headings, lists, and structure where possible; warn in the thread if structure would be lost). |
+| FR-14.33 | Auto edits must be **undoable** via standard Undo (one logical undo step per tool call, unless batched by user preference). |
+| FR-14.34 | The UI must show a count of **pending suggestions** when any exist (status bar and/or assistant panel). |
+| FR-14.35 | Failed write tools must not leave orphan suggestion decorations or half-applied edits — failures roll back cleanly. |
+
+### 18.6 Error handling
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.36 | **Insufficient credit / quota exceeded** — detect gateway billing errors (e.g. 402, 403 with credit message). Show a clear, non-technical message in the thread with a link to Vercel AI Gateway billing. Do not retry automatically. |
+| FR-14.37 | **Invalid or missing API key** — prompt the user to update the key in Preferences; send no content until fixed. |
+| FR-14.38 | **Rate limited (429)** — show a rate-limited message with optional retry after backoff. |
+| FR-14.39 | **Network / timeout** — user-visible error; preserve partial streamed content where possible; allow retry of the last message. |
+| FR-14.40 | **Model unavailable** — suggest choosing another enabled model; log technical detail to the optional debug log (FR-14.8). |
+
+### 18.7 Inline autocomplete
+
+| ID | Requirement |
+|----|-------------|
+| FR-14.41 | With AI enabled (FR-14.1), MarkDoc may offer **inline autocomplete** as ghost text after the cursor, suggesting the next few words or sentences as the user types. |
+| FR-14.42 | **Tab** accepts the suggestion; **Esc** dismisses it. Accepting is undoable as one step. |
+| FR-14.43 | Autocomplete uses the same Vercel AI Gateway stack and API key as the assistant (FR-14.2); context window (paragraph, section, or document) and max tokens are configurable in Preferences and disclosed to the user. |
+| FR-14.44 | Autocomplete must be **disabled in code blocks** by default. |
+| FR-14.45 | Requests must be debounced; in-flight suggestions must be cancelled when the user continues typing. Autocomplete must degrade gracefully when the gateway is unreachable. |
+| FR-14.46 | A status indicator must show when AI (including autocomplete) is active for the current document/window. |
+
 
 - Should style overrides be a single sidecar file per document, or a shared "style palette" the user can define once and apply to many documents?
 - Should the asset/image folder naming and location be user-configurable, or fixed by convention?
@@ -261,3 +356,5 @@ To keep the initial release focused, the following are explicitly **not** requir
 - Should MarkDoc warn or auto-downscale on inserting a very large image (Section 11), given images are copied into the document's asset folder (FR-10.2) and large files bloat both the folder and in-app performance?
 - Full keyboard operability (beyond the VoiceOver-specific testing in `testing-requirements.md` QR-5.2) — should this be a formally tracked accessibility commitment given Tiptap/ProseMirror's contenteditable-based accessibility challenges (`design-guide.md` Section 13)?
 - How should MarkDoc handle non-UTF-8-encoded or BOM-prefixed `.md` files on open, rather than assuming UTF-8 throughout?
+- Should the assistant support slash commands in the composer (`/summarise`, `/rewrite`) in v1 or via suggested prompts only?
+- Exact default model IDs for FR-14.5 — validate against the live gateway catalogue at implementation time.

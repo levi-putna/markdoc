@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "error": {
+    "code": "insufficient_credit",
+    "message": "Insufficient AI Gateway credits."
+  }
+}

@@ -1,8 +1,11 @@
 import { useEditor, EditorContent, ReactNodeViewRenderer, type Editor } from '@tiptap/react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { createTiptapExtensions } from '@shared/tiptap-extensions'
 import { SyntaxReveal } from '@shared/syntax-reveal'
+import { AiSuggestions } from '@shared/ai-suggestions'
+import { AiAutocomplete } from '@shared/ai-autocomplete'
 import { MarkdocImage } from './ImageNodeView'
+import { nanoid } from 'nanoid'
 import { getDebounceMs } from '@shared/types'
 import { getMarkdownFromEditor } from '@shared/markdown'
 import {
@@ -19,6 +22,8 @@ interface MarkdocEditorProps {
   onContentChange?: ({ markdown, html }: { markdown: string; html: string }) => void
   onEditorReady?: ({ editor }: { editor: Editor }) => void
   onInsertImage?: () => void
+  onAskAssistant?: ({ text }: { text: string }) => void
+  onSelectionChange?: ({ hasSelection }: { hasSelection: boolean }) => void
   scrollToPos?: { pos: number; nonce: number } | null
 }
 
@@ -30,6 +35,8 @@ export function MarkdocEditor({
   onContentChange,
   onEditorReady,
   onInsertImage,
+  onAskAssistant,
+  onSelectionChange,
   scrollToPos,
 }: MarkdocEditorProps) {
   const {
@@ -45,6 +52,9 @@ export function MarkdocEditor({
   } = useDocumentStore()
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autocompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autocompleteRequestId = useRef<string | null>(null)
+  const scheduleAutocompleteRef = useRef<(ed: Editor) => void>(() => {})
   const isLocalUpdate = useRef(false)
   const rafRef = useRef<number | null>(null)
 
@@ -52,7 +62,7 @@ export function MarkdocEditor({
     extensions: [...createTiptapExtensions({
       codeBlockNodeView: () => ReactNodeViewRenderer(CodeBlockView),
       imageExtension: MarkdocImage,
-    }), SyntaxReveal],
+    }), SyntaxReveal, AiSuggestions, AiAutocomplete],
     content,
     editorProps: {
       attributes: {
@@ -79,9 +89,12 @@ export function MarkdocEditor({
       debounceRef.current = setTimeout(() => {
         onContentChange?.({ markdown, html: ed.getHTML() })
       }, debounceMs)
+
+      scheduleAutocompleteRef.current(ed)
     },
     onSelectionUpdate: ({ editor: ed }) => {
       setActiveHeadingId(findActiveHeadingId({ editor: ed }))
+      onSelectionChange?.({ hasSelection: !ed.state.selection.empty })
     },
   })
 
@@ -184,6 +197,112 @@ export function MarkdocEditor({
     }
   }, [editor, scrollToPos])
 
+  /** Debounced inline autocomplete via IPC (FR-14.41). */
+  scheduleAutocompleteRef.current = (ed: Editor) => {
+    if (!preferences.aiEnabled || !preferences.autocompleteEnabled || !window.markdoc) return
+    if (!ed.state.selection.empty) return
+    if (ed.isActive('codeBlock')) {
+      ed.commands.clearAutocompleteGhost()
+      return
+    }
+
+    if (autocompleteRef.current) clearTimeout(autocompleteRef.current)
+    autocompleteRef.current = setTimeout(() => {
+      const { from } = ed.state.selection
+      const docText = ed.state.doc.textBetween(0, ed.state.doc.content.size, '\n')
+      const prefix = docText.slice(0, from)
+      const suffix = docText.slice(from)
+      if (prefix.trim().length < 8) return
+
+      const requestId = nanoid()
+      autocompleteRequestId.current = requestId
+      void window.markdoc?.requestAutocomplete({
+        requestId,
+        modelId: preferences.defaultAutocompleteModel,
+        prefix,
+        suffix,
+        contextWindow: preferences.autocompleteContextWindow,
+      })
+    }, 600)
+  }
+
+  useEffect(() => {
+    if (!editor || !window.markdoc) return
+
+    const unsub = window.markdoc.onAutocompleteResult(({ requestId, text }) => {
+      if (requestId !== autocompleteRequestId.current) return
+      if (!text) {
+        editor.commands.clearAutocompleteGhost()
+        return
+      }
+      editor.commands.setAutocompleteGhost(text)
+    })
+
+    return unsub
+  }, [editor])
+
+  useEffect(() => {
+    if (!editor) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        const ghost = document.querySelector('.ai-autocomplete-ghost')?.textContent
+        if (ghost) {
+          event.preventDefault()
+          editor.commands.insertContent(ghost)
+          editor.commands.clearAutocompleteGhost()
+          if (autocompleteRequestId.current) {
+            void window.markdoc?.cancelAutocomplete({ requestId: autocompleteRequestId.current })
+          }
+        }
+      }
+      if (event.key === 'Escape') {
+        editor.commands.clearAutocompleteGhost()
+        if (autocompleteRequestId.current) {
+          void window.markdoc?.cancelAutocomplete({ requestId: autocompleteRequestId.current })
+        }
+      }
+    }
+
+    editor.view.dom.addEventListener('keydown', onKeyDown)
+    return () => editor.view.dom.removeEventListener('keydown', onKeyDown)
+  }, [editor])
+
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      if (!editor || !onAskAssistant) return
+      const { from, to, empty } = editor.state.selection
+      if (empty) return
+      event.preventDefault()
+
+      const text = editor.state.doc.textBetween(from, to, '\n')
+      const menu = document.createElement('div')
+      menu.className =
+        'fixed z-50 rounded border border-border-subtle bg-surface-primary py-1 text-sm shadow-lg'
+      menu.style.left = `${event.clientX}px`
+      menu.style.top = `${event.clientY}px`
+
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'block w-full px-3 py-1.5 text-left hover:bg-surface-secondary'
+      item.textContent = 'Ask Assistant'
+      item.addEventListener('click', () => {
+        onAskAssistant({ text })
+        menu.remove()
+      })
+
+      const dismiss = () => {
+        menu.remove()
+        document.removeEventListener('click', dismiss)
+      }
+
+      menu.appendChild(item)
+      document.body.appendChild(menu)
+      setTimeout(() => document.addEventListener('click', dismiss), 0)
+    },
+    [editor, onAskAssistant]
+  )
+
   if (!editor) return null
 
   /**
@@ -211,6 +330,7 @@ export function MarkdocEditor({
           editor={editor}
           className="min-h-full"
           onMouseDown={handleContentAreaMouseDown}
+          onContextMenu={handleContextMenu}
         />
       </div>
     </div>

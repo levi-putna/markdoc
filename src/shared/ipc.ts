@@ -1,4 +1,19 @@
 import type { JSONContent } from '@tiptap/core'
+import type {
+  ApplyEditPayload,
+  AssistantEditMode,
+  AutocompleteContextWindow,
+  ChatSendPayload,
+  ChatStreamChunk,
+  DocumentSnapshot,
+  SuggestionDecorationPayload,
+} from './ai/types'
+import type { GatewayModelInfo } from './ai/model-pricing'
+import {
+  DEFAULT_ASSISTANT_MODEL,
+  DEFAULT_AUTOCOMPLETE_MODEL,
+  DEFAULT_ENABLED_MODEL_IDS,
+} from './ai/default-models'
 
 /**
  * IPC channel names and payload types shared across main, preload, and renderer.
@@ -53,6 +68,34 @@ export const IPC_CHANNELS = {
   DIALOG_FOLDER: 'dialog:folder',
   OPEN_LOGS: 'app:open-logs',
   COPY_DIAGNOSTICS: 'app:copy-diagnostics',
+  APP_OPEN_PREFERENCES: 'app:open-preferences',
+  APP_OPEN_EXTERNAL: 'app:open-external',
+  AI_CHAT_SEND: 'ai:chat:send',
+  AI_CHAT_CANCEL: 'ai:chat:cancel',
+  AI_CHAT_STREAM_CHUNK: 'ai:chat:stream-chunk',
+  AI_CONVERSATIONS_GET: 'ai:conversations:get',
+  AI_CONVERSATIONS_LIST: 'ai:conversations:list',
+  AI_CONVERSATIONS_LOAD: 'ai:conversations:load',
+  AI_CONVERSATIONS_SAVE: 'ai:conversations:save',
+  AI_CONVERSATIONS_START_NEW: 'ai:conversations:start-new',
+  AI_CONVERSATIONS_CLEAR: 'ai:conversations:clear',
+  AI_CONVERSATIONS_CLEAR_ALL: 'ai:conversations:clear-all',
+  AI_CONVERSATIONS_CHANGED: 'ai:conversations:changed',
+  AI_MODELS_LIST: 'ai:models:list',
+  AI_KEY_SET: 'ai:key:set',
+  AI_KEY_TEST: 'ai:key:test',
+  AI_KEY_CLEAR: 'ai:key:clear',
+  AI_KEY_HAS: 'ai:key:has',
+  AI_DOCUMENT_SNAPSHOT: 'ai:document:snapshot',
+  AI_DOCUMENT_SNAPSHOT_REQUEST: 'ai:document:snapshot-request',
+  AI_SUGGESTION_APPLY: 'ai:suggestion:apply',
+  AI_SUGGESTION_ACCEPT: 'ai:suggestion:accept',
+  AI_SUGGESTION_REJECT: 'ai:suggestion:reject',
+  AI_SUGGESTION_ACCEPT_ALL: 'ai:suggestion:accept-all',
+  AI_SUGGESTION_REJECT_ALL: 'ai:suggestion:reject-all',
+  AI_AUTOCOMPLETE_REQUEST: 'ai:autocomplete:request',
+  AI_AUTOCOMPLETE_CANCEL: 'ai:autocomplete:cancel',
+  AI_AUTOCOMPLETE_RESULT: 'ai:autocomplete:result',
 } as const
 
 export type ViewMode = 'edit' | 'markdown' | 'preview' | 'split'
@@ -83,6 +126,15 @@ export interface AppPreferences {
   cliInstalled: boolean
   recentFiles: string[]
   windowStates: WindowState[]
+  aiEnabled: boolean
+  aiDisclosureAccepted: boolean
+  enabledModelIds: string[]
+  defaultAssistantModel: string
+  defaultAutocompleteModel: string
+  assistantEditMode: AssistantEditMode
+  autocompleteContextWindow: AutocompleteContextWindow
+  autocompleteEnabled: boolean
+  aiDebugLogEnabled: boolean
 }
 
 export interface WindowState {
@@ -91,6 +143,33 @@ export interface WindowState {
   viewMode: ViewMode
   sidebarVisible: boolean
   sidebarWidth: number
+  assistantVisible: boolean
+  assistantWidth: number
+}
+
+export type { ChatSendPayload, ChatStreamChunk, DocumentSnapshot, SuggestionDecorationPayload, ApplyEditPayload }
+
+export interface AiKeyTestResult {
+  success: boolean
+  error?: string
+}
+
+export interface AiModelsListResult {
+  models: GatewayModelInfo[]
+  cachedAt: number | null
+}
+
+export interface AutocompleteRequestPayload {
+  modelId: string
+  prefix: string
+  suffix: string
+  contextWindow: AutocompleteContextWindow
+}
+
+export interface AutocompleteResultPayload {
+  requestId: string
+  text: string
+  error?: string
 }
 
 export interface DocumentPayload {
@@ -213,6 +292,15 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   cliInstalled: false,
   recentFiles: [],
   windowStates: [],
+  aiEnabled: false,
+  aiDisclosureAccepted: false,
+  enabledModelIds: [...DEFAULT_ENABLED_MODEL_IDS],
+  defaultAssistantModel: DEFAULT_ASSISTANT_MODEL,
+  defaultAutocompleteModel: DEFAULT_AUTOCOMPLETE_MODEL,
+  assistantEditMode: 'suggestion',
+  autocompleteContextWindow: 'paragraph',
+  autocompleteEnabled: false,
+  aiDebugLogEnabled: false,
 }
 
 export const SUPPORTED_EXTENSIONS = ['.md', '.markdown', '.mdown', '.mkd']

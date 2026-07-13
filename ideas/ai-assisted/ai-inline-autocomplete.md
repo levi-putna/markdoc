@@ -1,8 +1,8 @@
 # AI Inline Autocomplete
 
-**Status:** Idea  
+**Status:** Promoted → `functional-requirements.md` Section 18.7 (FR-14.41–FR-14.46)  
 **Category:** AI-assisted writing  
-**Related:** Section 16 (Out of Scope — no cloud dependency for v1 core)
+**Related:** Section 16 (Out of Scope — no cloud dependency for v1 core), [ai-document-assistant](./ai-document-assistant.md)
 
 ## Overview
 

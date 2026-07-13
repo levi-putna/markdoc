@@ -1,7 +1,22 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
-import { Palette, Terminal, Type } from 'lucide-react'
+import { Palette, Terminal, Type, Bot } from 'lucide-react'
 import { useDocumentStore } from '../store/document-store'
 import type { AppearanceMode, SidebarDensity } from '@shared/ipc'
+import { DEFAULT_ENABLED_MODEL_IDS } from '@shared/ai/default-models'
+import { AI_GATEWAY_KEYS_URL } from '@shared/ai/types'
+import { tierModels } from '@shared/ai/model-pricing'
+import type { GatewayModelInfo } from '@shared/ai/model-pricing'
+import { EnabledModelsSection } from './EnabledModelsSection'
+import { EnabledModelSelect } from './EnabledModelSelect'
+import { Switch } from '@renderer/components/ui/switch'
+import { Button } from '@renderer/components/ui/button'
+import {
+  formControlClassName,
+  formControlWidthClassName,
+  formButtonPrimaryClassName,
+  formButtonSecondaryClassName,
+  formControlSlotClassName,
+} from '@renderer/lib/form-control-styles'
 
 const FONT_SIZE_RANGE = { min: 12, max: 24 }
 const LINE_SPACING_RANGE = { min: 1, max: 2.5 }
@@ -24,7 +39,7 @@ const FONT_FAMILY_OPTIONS = [
   },
 ] as const
 
-type SettingsSection = 'appearance' | 'editor' | 'cli'
+type SettingsSection = 'appearance' | 'editor' | 'ai' | 'cli'
 
 const NAV_ITEMS: {
   id: SettingsSection
@@ -33,6 +48,7 @@ const NAV_ITEMS: {
 }[] = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'editor', label: 'Editor', icon: Type },
+  { id: 'ai', label: 'AI', icon: Bot },
   { id: 'cli', label: 'CLI', icon: Terminal },
 ]
 
@@ -62,15 +78,22 @@ function PreferenceRow({
   label,
   description,
   htmlFor,
+  align = 'center',
   children,
 }: {
   label: string
   description?: string
   htmlFor?: string
+  /** Vertically align the control column — use `start` for multi-line controls. */
+  align?: 'center' | 'start'
   children: ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-6 border-b border-border-subtle py-4 last:border-b-0">
+    <div
+      className={`flex justify-between gap-6 border-b border-border-subtle py-4 last:border-b-0 ${
+        align === 'start' ? 'items-start' : 'items-center'
+      }`}
+    >
       <div className="min-w-0 flex-1">
         <label htmlFor={htmlFor} className="block text-sm font-medium">
           {label}
@@ -79,7 +102,7 @@ function PreferenceRow({
           <p className="mt-1 text-xs leading-relaxed text-content-secondary">{description}</p>
         )}
       </div>
-      <div className="shrink-0 pt-0.5">{children}</div>
+      <div className={align === 'start' ? 'shrink-0' : formControlSlotClassName}>{children}</div>
     </div>
   )
 }
@@ -115,6 +138,12 @@ export function PreferencesPage() {
   // Text mirrors for number fields so partial input isn't clamped mid-keystroke
   const [fontSizeText, setFontSizeText] = useState(String(preferences.editorFontSize))
   const [lineSpacingText, setLineSpacingText] = useState(String(preferences.editorLineSpacing))
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [hasApiKey, setHasApiKey] = useState(false)
+  const [aiModels, setAiModels] = useState<GatewayModelInfo[]>([])
+  const [keyTestStatus, setKeyTestStatus] = useState<string | null>(null)
+  const [showDisclosure, setShowDisclosure] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
 
   /** Refreshes CLI install status from the main process. */
   const refreshCliStatus = useCallback(async () => {
@@ -146,14 +175,121 @@ export function PreferencesPage() {
     }
   }, [activeSection, refreshCliStatus])
 
-  const update = async (patch: Partial<typeof local>) => {
-    const next = { ...local, ...patch }
-    setLocal(next)
-    if (window.markdoc) {
-      await window.markdoc.setPreferences(patch)
+  /** Loads AI key status and model catalogue. */
+  const refreshAiStatus = useCallback(async () => {
+    if (!window.markdoc) return
+    const [hasKey, modelsResult] = await Promise.all([
+      window.markdoc.hasAiApiKey(),
+      window.markdoc.listAiModels(),
+    ])
+    setHasApiKey(hasKey)
+    setAiModels(modelsResult.models)
+  }, [])
+
+  useEffect(() => {
+    if (activeSection === 'ai') {
+      void refreshAiStatus()
     }
-    setPreferences(patch)
+  }, [activeSection, refreshAiStatus])
+
+  const catalogueModels: GatewayModelInfo[] =
+    aiModels.length > 0
+      ? aiModels
+      : DEFAULT_ENABLED_MODEL_IDS.map((id) => ({ id, name: id.split('/').pop() ?? id }))
+
+  const costTiers = tierModels({ models: catalogueModels })
+
+  const handleSaveApiKey = async () => {
+    if (!window.markdoc || !apiKeyInput.trim()) return
+    setAiBusy(true)
+    setKeyTestStatus(null)
+    try {
+      const test = await window.markdoc.testAiApiKey({ apiKey: apiKeyInput.trim() })
+      if (!test.success) {
+        setKeyTestStatus(test.error ?? 'API key test failed.')
+        return
+      }
+      await window.markdoc.setAiApiKey({ apiKey: apiKeyInput.trim() })
+      setApiKeyInput('')
+      setHasApiKey(true)
+      setKeyTestStatus('API key saved and verified.')
+      await refreshAiStatus()
+    } finally {
+      setAiBusy(false)
+    }
   }
+
+  const handleClearApiKey = async () => {
+    if (!window.markdoc) return
+    await window.markdoc.clearAiApiKey()
+    setHasApiKey(false)
+    setKeyTestStatus('API key removed.')
+  }
+
+  const handleClearAllConversations = async () => {
+    if (!window.markdoc) return
+    const confirmed = window.confirm('Clear all assistant conversation history? This cannot be undone.')
+    if (!confirmed) return
+    await window.markdoc.clearAllConversations()
+  }
+
+  const handleAiToggle = async (enabled: boolean) => {
+    if (enabled && !local.aiDisclosureAccepted) {
+      setShowDisclosure(true)
+      return
+    }
+    await update({ aiEnabled: enabled })
+  }
+
+  const handleAcceptDisclosure = async () => {
+    setShowDisclosure(false)
+    await update({ aiDisclosureAccepted: true, aiEnabled: true })
+  }
+
+  const addModelEnabled = async ({ modelId }: { modelId: string }) => {
+    setLocal((previous) => {
+      if (previous.enabledModelIds.includes(modelId)) return previous
+
+      const enabledModelIds = [...previous.enabledModelIds, modelId]
+      void persistPreferences({ enabledModelIds })
+      setPreferences({ enabledModelIds })
+      return { ...previous, enabledModelIds }
+    })
+  }
+
+  const removeModelEnabled = async ({ modelId }: { modelId: string }) => {
+    if (local.enabledModelIds.length <= 1) return
+
+    const next = local.enabledModelIds.filter((id) => id !== modelId)
+    const patch: Partial<typeof local> = { enabledModelIds: next }
+
+    if (local.defaultAssistantModel === modelId) {
+      patch.defaultAssistantModel = next[0]
+    }
+    if (local.defaultAutocompleteModel === modelId) {
+      patch.defaultAutocompleteModel = next[0]
+    }
+
+    await update(patch)
+  }
+
+  const persistPreferences = useCallback(
+    async (patch: Partial<typeof local>) => {
+      if (window.markdoc) {
+        await window.markdoc.setPreferences(patch)
+      }
+      setPreferences(patch)
+    },
+    [setPreferences]
+  )
+
+  const update = useCallback(
+    async (patch: Partial<typeof local>) => {
+      setLocal((previous) => ({ ...previous, ...patch }))
+      await persistPreferences(patch)
+    },
+    [persistPreferences]
+  )
 
   /** Commits the font size field, clamped to its valid range. */
   const commitFontSize = (value: string) => {
@@ -200,8 +336,11 @@ export function PreferencesPage() {
     }
   }
 
-  const controlClassName =
-    'w-44 max-w-full rounded border border-border-subtle bg-surface-primary px-2 py-1 text-sm'
+  const openExternalLink = useCallback((url: string) => {
+    void window.markdoc.openExternal({ url })
+  }, [])
+
+  const controlClassName = `${formControlWidthClassName} ${formControlClassName}`
 
   return (
     <div
@@ -224,9 +363,9 @@ export function PreferencesPage() {
                   onClick={() => setActiveSection(id)}
                   aria-current={isActive ? 'page' : undefined}
                   className={[
-                    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                    'flex w-full items-center gap-2 rounded-xs px-2 py-1.5 text-left text-sm transition-colors',
                     isActive
-                      ? 'bg-accent/12 font-medium text-accent'
+                      ? 'bg-brand-selection font-medium text-brand'
                       : 'text-content-text hover:bg-[color-mix(in_srgb,var(--content-text)_6%,transparent)]',
                   ].join(' ')}
                   data-testid={`pref-nav-${id}`}
@@ -326,7 +465,7 @@ export function PreferencesPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') commitFontSize(e.currentTarget.value)
                   }}
-                  className="w-20 rounded border border-border-subtle bg-surface-primary px-2 py-1 text-sm [font-variant-numeric:tabular-nums]"
+                  className={`w-20 ${formControlClassName} [font-variant-numeric:tabular-nums]`}
                   data-testid="pref-font-size"
                 />
               </PreferenceRow>
@@ -347,7 +486,7 @@ export function PreferencesPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') commitLineSpacing(e.currentTarget.value)
                   }}
-                  className="w-20 rounded border border-border-subtle bg-surface-primary px-2 py-1 text-sm [font-variant-numeric:tabular-nums]"
+                  className={`w-20 ${formControlClassName} [font-variant-numeric:tabular-nums]`}
                   data-testid="pref-line-spacing"
                 />
               </PreferenceRow>
@@ -364,6 +503,206 @@ export function PreferencesPage() {
                   data-testid="pref-spellcheck"
                 />
               </PreferenceRow>
+            </section>
+          )}
+
+          {activeSection === 'ai' && (
+            <section data-testid="pref-section-ai">
+              <PreferenceSectionHeader
+                title="AI Assistant"
+                description="Connect to Vercel AI Gateway for document-aware writing assistance. AI is off by default and your API key is stored securely in the macOS Keychain."
+              />
+
+              <PreferenceRow
+                label="Enable AI"
+                description="Turn on the assistant panel and AI features. No network requests are made until enabled."
+                htmlFor="pref-ai-enabled"
+              >
+                <Switch
+                  id="pref-ai-enabled"
+                  checked={local.aiEnabled}
+                  onCheckedChange={(checked) => void handleAiToggle(checked)}
+                  data-testid="pref-ai-enabled"
+                />
+              </PreferenceRow>
+
+              {local.aiEnabled && (
+                <>
+              <PreferenceRow
+                label="API key"
+                description={
+                  hasApiKey
+                    ? 'A key is stored in your Keychain. Enter a new key to replace it.'
+                    : 'Your Vercel AI Gateway API key. Stored in the macOS Keychain, never in config.json.'
+                }
+                htmlFor="pref-ai-api-key"
+                align="start"
+              >
+                <div className="flex flex-col items-end gap-2">
+                  <input
+                    id="pref-ai-api-key"
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder={hasApiKey ? '••••••••' : 'Enter API key'}
+                    className={`w-56 ${formControlClassName}`}
+                    data-testid="pref-ai-api-key"
+                  />
+                  <button
+                    type="button"
+                    className="text-xs text-brand underline hover:opacity-80"
+                    onClick={() => openExternalLink(AI_GATEWAY_KEYS_URL)}
+                  >
+                    Create a key in Vercel
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className={formButtonSecondaryClassName}
+                      onClick={() => void handleSaveApiKey()}
+                      disabled={aiBusy || !apiKeyInput.trim()}
+                    >
+                      Save &amp; test
+                    </button>
+                    {hasApiKey && (
+                      <button
+                        type="button"
+                        className={`${formButtonSecondaryClassName} text-red-600`}
+                        onClick={() => void handleClearApiKey()}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {keyTestStatus && (
+                    <p className="max-w-xs text-right text-xs text-content-secondary">{keyTestStatus}</p>
+                  )}
+                </div>
+              </PreferenceRow>
+
+              <PreferenceRow
+                label="Edit mode"
+                description="Suggestion mode shows track-changes for review; Auto applies edits immediately."
+                htmlFor="pref-ai-edit-mode"
+              >
+                <select
+                  id="pref-ai-edit-mode"
+                  value={local.assistantEditMode}
+                  onChange={(e) =>
+                    void update({ assistantEditMode: e.target.value as 'suggestion' | 'auto' })
+                  }
+                  className={controlClassName}
+                >
+                  <option value="suggestion">Suggestion</option>
+                  <option value="auto">Auto</option>
+                </select>
+              </PreferenceRow>
+
+              <PreferenceRow
+                label="Inline autocomplete"
+                description="Ghost-text suggestions while typing (separate from the assistant panel)."
+                htmlFor="pref-autocomplete-enabled"
+              >
+                <Switch
+                  id="pref-autocomplete-enabled"
+                  checked={local.autocompleteEnabled}
+                  onCheckedChange={(checked) => void update({ autocompleteEnabled: checked })}
+                />
+              </PreferenceRow>
+
+              <PreferenceRow
+                label="Clear conversation history"
+                description="Remove all saved assistant threads from this Mac."
+              >
+                <button
+                  type="button"
+                  className={`${formButtonSecondaryClassName} text-red-600`}
+                  onClick={() => void handleClearAllConversations()}
+                  data-testid="pref-ai-clear-history"
+                >
+                  Clear all
+                </button>
+              </PreferenceRow>
+
+              <EnabledModelsSection
+                enabledModelIds={local.enabledModelIds}
+                catalogueModels={catalogueModels}
+                costTiers={costTiers}
+                onAddModel={addModelEnabled}
+                onRemoveModel={removeModelEnabled}
+              />
+
+              <PreferenceRow
+                label="Default assistant model"
+                description="Model used for chat and document edits."
+                htmlFor="pref-ai-default-model"
+              >
+                <EnabledModelSelect
+                  id="pref-ai-default-model"
+                  value={local.defaultAssistantModel}
+                  enabledModelIds={local.enabledModelIds}
+                  catalogueModels={catalogueModels}
+                  costTiers={costTiers}
+                  showCostTier
+                  testId="pref-ai-default-model"
+                  onValueChange={({ modelId }) => void update({ defaultAssistantModel: modelId })}
+                />
+              </PreferenceRow>
+
+              <PreferenceRow
+                label="Autocomplete model"
+                description="Model used for inline ghost-text completions."
+                htmlFor="pref-autocomplete-model"
+              >
+                <EnabledModelSelect
+                  id="pref-autocomplete-model"
+                  value={local.defaultAutocompleteModel}
+                  enabledModelIds={local.enabledModelIds}
+                  catalogueModels={catalogueModels}
+                  costTiers={costTiers}
+                  testId="pref-autocomplete-model"
+                  onValueChange={({ modelId }) => void update({ defaultAutocompleteModel: modelId })}
+                />
+              </PreferenceRow>
+                </>
+              )}
+
+              {showDisclosure && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="ai-disclosure-title"
+                >
+                  <div className="max-w-md rounded-xs border border-border-subtle bg-surface-primary p-6 shadow-xl">
+                    <h3 id="ai-disclosure-title" className="text-base font-semibold">
+                      AI disclosure
+                    </h3>
+                    <p className="mt-3 text-sm leading-relaxed text-content-secondary">
+                      When AI is enabled, document content and your prompts are sent to Vercel AI
+                      Gateway using your API key. Conversations are stored locally per document.
+                      Usage is billed to your Vercel account.
+                    </p>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowDisclosure(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        className="bg-brand text-white hover:bg-brand/90"
+                        onClick={() => void handleAcceptDisclosure()}
+                        data-testid="pref-ai-disclosure-accept"
+                      >
+                        I understand
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -390,7 +729,7 @@ export function PreferencesPage() {
                   <span
                     className={
                       local.cliInstalled
-                        ? 'font-medium text-accent'
+                        ? 'font-medium text-brand'
                         : 'text-content-secondary'
                     }
                   >
@@ -412,7 +751,7 @@ export function PreferencesPage() {
                 )}
                 <button
                   type="button"
-                  className="mt-4 rounded-sm bg-accent px-4 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className={`mt-4 ${formButtonPrimaryClassName} px-4`}
                   onClick={handleCliToggle}
                   disabled={cliBusy}
                   data-testid="pref-cli-install"

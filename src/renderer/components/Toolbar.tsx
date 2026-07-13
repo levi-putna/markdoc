@@ -1,4 +1,4 @@
-import { PanelLeft, Search } from 'lucide-react'
+import { PanelLeft, Bot, Search } from 'lucide-react'
 import type { ViewMode } from '@shared/ipc'
 import { useDocumentStore } from '../store/document-store'
 
@@ -22,6 +22,8 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
     setViewMode,
     sidebarVisible,
     toggleSidebar,
+    assistantVisible,
+    toggleAssistant,
     isDirty,
     wordCount,
     charCount,
@@ -126,6 +128,17 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
             />
           )}
         </span>
+        <button
+          type="button"
+          className={`toolbar-icon-btn toolbar-icon-btn--header no-drag ${assistantVisible ? 'toolbar-icon-btn--active' : ''}`}
+          onClick={toggleAssistant}
+          aria-label={assistantVisible ? 'Hide assistant' : 'Show assistant'}
+          aria-pressed={assistantVisible}
+          title="Toggle Assistant (⌘⇧A)"
+          data-testid="assistant-toggle"
+        >
+          <Bot />
+        </button>
         <button
           type="button"
           className="toolbar-icon-btn toolbar-icon-btn--header no-drag"

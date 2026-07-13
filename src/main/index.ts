@@ -9,6 +9,7 @@ import log from 'electron-log'
 import chokidar from 'chokidar'
 import icon from '../../resources/icon.png?asset'
 import { PreferencesStore } from './preferences-store'
+import { openExternalUrl, registerExternalLinkHandlers } from './external-links'
 import {
   IPC_CHANNELS,
   type AppPreferences,
@@ -32,6 +33,7 @@ import { isRemoteImageSrc } from '../shared/image-src'
 import { checkForUpdatesManually, registerAutoUpdaterEvents, startBackgroundUpdateChecks } from './auto-updater'
 import { getCliInstallPath, installCli, isCliInstalled, uninstallCli } from './cli-installer'
 import { parseLaunchArgv } from '../shared/launch-args'
+import { registerAiIpcHandlers } from './ai/register-ai-handlers'
 
 const preferencesStore = new PreferencesStore()
 
@@ -278,6 +280,13 @@ function createApplicationMenu(): void {
           accelerator: 'CmdOrCtrl+\\',
           click: () => {
             getTargetWindow()?.webContents.send('menu:toggle-sidebar')
+          },
+        },
+        {
+          label: 'Toggle Assistant',
+          accelerator: 'CmdOrCtrl+Shift+A',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:toggle-assistant')
           },
         },
         { type: 'separator' },
@@ -561,6 +570,8 @@ async function persistSessionState(): Promise<void> {
       viewMode: saved.viewMode ?? 'edit',
       sidebarVisible: saved.sidebarVisible ?? true,
       sidebarWidth: saved.sidebarWidth ?? 240,
+      assistantVisible: saved.assistantVisible ?? false,
+      assistantWidth: saved.assistantWidth ?? 320,
     })
   }
   await preferencesStore.merge({ windowStates: states })
@@ -570,6 +581,16 @@ async function persistSessionState(): Promise<void> {
  * Registers IPC handlers for file and preference operations.
  */
 function registerIpcHandlers(): void {
+  registerAiIpcHandlers({ preferencesStore })
+
+  ipcMain.handle(IPC_CHANNELS.APP_OPEN_PREFERENCES, async () => {
+    createPreferencesWindow()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.APP_OPEN_EXTERNAL, async (_, { url }: { url: string }) => {
+    await openExternalUrl(url)
+  })
+
   ipcMain.handle(IPC_CHANNELS.FILE_READ, async (_, filePath: string) => {
     app.addRecentDocument(filePath)
     return readMarkdownFile(filePath)
@@ -1207,6 +1228,7 @@ function bootstrap(): void {
     await preferencesStore.load()
     configureAboutPanel()
     createApplicationMenu()
+    registerExternalLinkHandlers()
     registerIpcHandlers()
 
     // Spellchecker language follows system locale (TR-2.13)

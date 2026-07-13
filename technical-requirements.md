@@ -14,10 +14,10 @@ MarkDoc is an Electron desktop application (confirmed architectural decision —
 |----|-------------|
 | TR-1.1 | MarkDoc follows Electron's standard multi-process architecture: one **main process** (Node.js, owns app lifecycle, windows, menus, file I/O, single-instance handling) and one **renderer process per window** (Chromium, owns UI/editor/preview), communicating exclusively via IPC. |
 | TR-1.2 | Each renderer must load with `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true`. Renderers must never have direct access to Node.js APIs or the filesystem — all privileged operations (file read/write, dialogs, export) go through a **preload script** exposing a narrow, typed API via `contextBridge.exposeInMainWorld`. |
-| TR-1.3 | The preload-exposed API (working name `window.markdoc`) must cover: `openFile()`, `saveFile()`, `saveFileAs()`, `readAsset()`/`writeAsset()`, `exportPdf()`, `exportDocx()`, `getRecentFiles()`, `onFileOpenRequested()` (for Finder/CLI-triggered opens), and preference get/set. No other Node/Electron API surface is exposed to renderer code. |
+| TR-1.3 | The preload-exposed API (working name `window.markdoc`) must cover: `openFile()`, `saveFile()`, `saveFileAs()`, `readAsset()`/`writeAsset()`, `exportPdf()`, `exportDocx()`, `getRecentFiles()`, `onFileOpenRequested()` (for Finder/CLI-triggered opens), preference get/set, and **AI operations** (Section 17): streaming chat send/cancel, tool execution callbacks, conversation history load/save, model catalogue fetch, gateway key set/test, and autocomplete request/cancel. No other Node/Electron API surface is exposed to renderer code. |
 | TR-1.4 | Each open document (Section 6 of the functional spec) maps to one `BrowserWindow` (or one native macOS tab sharing a `tabbingIdentifier`), each with its own renderer process, so a crash or hang in one document's editor cannot take down other open documents. |
 | TR-1.5 | The main process owns a single `AppState` responsible for: the list of open windows/documents, the single-instance lock, and dispatching CLI/Finder open requests to the correct window (new or existing). |
-| TR-1.6 | The main window uses `titleBarStyle: 'hiddenInset'` (native inset traffic-light controls, no OS-drawn title bar text area) with a custom, React-rendered toolbar region implementing FR-1.7 — the sidebar toggle, Edit/Preview/Split segmented control, and search entry point. This toolbar region must be marked draggable (`-webkit-app-region: drag`), with interactive controls inside it explicitly marked non-draggable (`-webkit-app-region: no-drag`), so it behaves like a native macOS toolbar rather than a fixed web header. |
+| TR-1.6 | The main window uses `titleBarStyle: 'hiddenInset'` (native inset traffic-light controls, no OS-drawn title bar text area) with a custom, React-rendered toolbar region implementing FR-1.7 — the sidebar toggle, Edit/Preview/Split segmented control, search entry point, and assistant-panel toggle (FR-14.10). The document area is a three-pane layout when both sidebars are visible: **left outline sidebar**, **centre editor/preview**, **right assistant panel** (FR-14.9). This toolbar region must be marked draggable (`-webkit-app-region: drag`), with interactive controls inside it explicitly marked non-draggable (`-webkit-app-region: no-drag`), so it behaves like a native macOS toolbar rather than a fixed web header. |
 | TR-1.7 | A dedicated Preferences window (a separate, non-resizable `BrowserWindow`, opened via the app menu and ⌘,) exposes the settings enumerated in FR-13.1, reading/writing the app-preferences store (TR-4.4). Preference changes are broadcast to all open document windows via IPC so they apply immediately (FR-13.3) without requiring a restart. |
 
 ---
@@ -40,6 +40,8 @@ MarkDoc is an Electron desktop application (confirmed architectural decision —
 | TR-2.12 | **Document search:** A lightweight in-memory search/indexing library (e.g. `minisearch` or `fuse.js`) powers ranked, fuzzy matching for the Document Search feature (FR-12.x), operating on a flat index derived from the current document (Section 9, TR-8.6) — no external search service or heavyweight full-text engine is needed at this scale. |
 | TR-2.13 | **Spellcheck:** Chromium's built-in spellchecker, enabled via `session.setSpellCheckerLanguages` and wired to the system dictionary/locale, plus native macOS text-substitution context-menu items (smart quotes, dashes, autocorrect suggestions) surfaced through `webContents.on('context-menu')` (FR-2.11). Toggled via the Preferences window (FR-13.1, TR-1.7). |
 | TR-2.14 | **Drag-and-drop:** `@dnd-kit` (`@dnd-kit/react` and its sortable utilities) powers outline tree reordering (FR-4.7–FR-4.10, Section 9) — chosen over HTML5-drag-based alternatives for its pointer-events-first architecture, built-in keyboard sensor, and ARIA live-region support, which the outline tree's accessibility requirements (FR-4.9) need out of the box rather than hand-rolled. |
+| TR-2.15 | **AI stack:** [Vercel AI SDK](https://sdk.vercel.ai/) (`ai`, `@ai-sdk/react`, `@ai-sdk/gateway`) for streaming chat, tool-calling agents, and inline autocomplete against [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). Model IDs use the gateway format (`provider/model-name`, e.g. `anthropic/claude-sonnet-4.5`). |
+| TR-2.16 | **AI UI:** [AI Elements](https://elements.ai-sdk.dev/) — installed via the AI Elements CLI into `src/renderer/components/ai-elements/` — provides the assistant panel primitives: [`Conversation`](https://elements.ai-sdk.dev/components/conversation), [`PromptInput`](https://elements.ai-sdk.dev/components/prompt-input), [`Queue`](https://elements.ai-sdk.dev/components/queue), and [`Shimmer`](https://elements.ai-sdk.dev/components/shimmer). AI Elements builds on shadcn/ui conventions and integrates with `@ai-sdk/react` streaming/status types. |
 
 ---
 
@@ -62,11 +64,12 @@ MarkDoc is an Electron desktop application (confirmed architectural decision —
 | TR-4.1 | The canonical, saved-to-disk format for a document is plain-text Markdown (CommonMark + GFM, per FR-7.x), optionally prefixed with YAML front matter. No proprietary binary or JSON format is used for the primary document — this guarantees portability outside MarkDoc. |
 | TR-4.2 | Per-document style overrides (FR-9.x) are stored in a **sidecar file** co-located with the document: `<document-name>.md` → `<document-name>.markdoc-style.json`. This file is optional; its absence means the base theme applies. Schema versioned via a top-level `"version"` field to allow safe future migration. |
 | TR-4.3 | Inserted images (FR-10.x) are stored in a co-located asset folder using the convention `<document-name>.assets/` (e.g. `notes.md` → `notes.assets/image-1.png`), referenced from the Markdown body via relative paths (e.g. `![alt](notes.assets/image-1.png)`). |
-| TR-4.4 | Application-level preferences (font settings, pane layout, recent files list, CLI-install state) are stored outside any document, in `~/Library/Application Support/MarkDoc/config.json` (via `electron-store` or an equivalent typed wrapper around that location). |
-| TR-4.5 | Window/session restoration state (FR-5.9) is persisted alongside app preferences, recording open file paths, window bounds, and active pane layout per window. |
+| TR-4.4 | Application-level preferences (font settings, pane layout, recent files list, CLI-install state, **AI settings** — master toggle, enabled model IDs, default models, autocomplete context window) are stored outside any document, in `~/Library/Application Support/MarkDoc/config.json` (via `electron-store` or an equivalent typed wrapper around that location). The **Vercel AI Gateway API key** is stored separately in the macOS Keychain, never in `config.json`. |
+| TR-4.5 | Window/session restoration state (FR-5.9) is persisted alongside app preferences, recording open file paths, window bounds, active pane layout, **assistant panel visibility/width** (FR-14.9), and left sidebar state per window. |
 | TR-4.6 | All file writes (document save, style sidecar save, asset copy) must be atomic (write to a temp file in the same directory, then rename) to avoid corrupting files if the app crashes or the system loses power mid-write. |
 | TR-4.7 | MarkDoc uses **explicit Save** (FR-5.5, resolved decision), not macOS Auto Save. Crash recovery (FR-5.11) is implemented as a separate periodic snapshot of in-memory unsaved content, written to a per-document recovery file in `~/Library/Application Support/MarkDoc/Recovery/` (keyed by the document's file path, not overwriting the real `.md` file), checked for and offered back to the user on next open, and deleted on a clean save or clean window close. |
 | TR-4.8 | Main process watches each open document's file path (e.g. via `chokidar` or Node's `fs.watch`) to detect external changes (FR-5.10). On a detected external change, the renderer is notified via IPC and must always show the reload/keep-editing prompt (FR-5.10) — no silent auto-reload, since a false-positive (e.g. from an atomic-write-induced rename/recreate from another tool) silently discarding local edits would be worse than an occasional unnecessary prompt. |
+| TR-4.9 | **Per-document assistant conversation history** (FR-14.18–FR-14.20) is stored in `~/Library/Application Support/MarkDoc/Conversations/`, keyed by a stable hash of the document file path (or a session UUID for unsaved untitled documents). Each file holds the serialised `UIMessage[]` thread for that document only. History is never written into the `.md` file or committed to git. |
 
 ---
 
@@ -215,8 +218,8 @@ Being upfront about where this strategy stops, so effort isn't wasted chasing an
 | TR-13.2 | A Content-Security-Policy is set on every renderer restricting `script-src` to `'self'` (bundled app code only) — no remote script execution, consistent with the fully-offline/local-first requirement. |
 | TR-13.3 | Raw HTML passthrough (FR-7.11) and pasted rich content are sanitized (TR-8.2) before insertion into the editor's DOM, preventing script injection from a maliciously crafted `.md` file someone might send the user. |
 | TR-13.4 | Mermaid rendering runs with `securityLevel: 'strict'` (TR-9.2); no diagram-embedded script/click handlers are executed. |
-| TR-13.5 | No remote content loading (`<img src="https://...">` is permitted to display, since that's normal Markdown, but no remote script/style/iframe loading is permitted) — network requests are limited to passive resource fetches the user's own content explicitly references. |
-| TR-13.6 | No telemetry, crash reporting, or analytics SDKs that transmit data off-device are included by default, consistent with the Privacy requirement in the functional spec. |
+| TR-13.5 | No remote content loading (`<img src="https://...">` is permitted to display, since that's normal Markdown, but no remote script/style/iframe loading is permitted) — network requests are limited to passive resource fetches the user's own content explicitly references. **Exception:** when AI is enabled (Section 17), HTTPS requests to Vercel AI Gateway (`ai-gateway.vercel.sh` and related endpoints) are permitted from the main process only; the renderer never holds the API key or opens gateway connections directly. |
+| TR-13.6 | No telemetry, crash reporting, or analytics SDKs that transmit data off-device are included by default, consistent with the Privacy requirement in the functional spec. Opt-in AI requests to Vercel AI Gateway are user-initiated and excluded from this rule. |
 
 ---
 
@@ -230,7 +233,60 @@ Being upfront about where this strategy stops, so effort isn't wasted chasing an
 
 ---
 
-## 16. Open Technical Decisions
+---
+
+## 17. AI Integration
+
+Implements `functional-requirements.md` Section 18 (FR-14.x). Promoted from [`ideas/ai-assisted/`](./ideas/ai-assisted/).
+
+### 17.1 Architecture & security
+
+| ID | Requirement |
+|----|-------------|
+| TR-15.1 | All Vercel AI Gateway HTTP requests and the Vercel AI SDK agent loop (`streamText` / `generateText` with tools) run in the **Electron main process** (or a Node worker owned by main). The renderer sends chat messages and receives streamed UI-message chunks via IPC; it never sees the API key. |
+| TR-15.2 | The gateway API key is stored in the macOS Keychain via a small credential helper (e.g. `keytar` or Electron `safeStorage` where appropriate). Preferences UI writes/reads the key through main-process IPC only. |
+| TR-15.3 | IPC channels for AI (defined in `src/shared`, TR-5.2) must include at minimum: `ai:chat:send`, `ai:chat:cancel`, `ai:chat:stream-chunk` (main → renderer), `ai:conversations:get`, `ai:conversations:save`, `ai:conversations:clear`, `ai:models:list`, `ai:key:set`, `ai:key:test`, `ai:autocomplete:request`, `ai:autocomplete:cancel`. Payload shapes follow Vercel AI SDK `UIMessage` / tool-part types where applicable. |
+| TR-15.4 | Tool implementations (`read_document`, `read_selection`, `read_outline`, `search_document`, `propose_edit`, `apply_edit`) live in `src/main/ai/tools/` (or `src/shared/ai/` for pure helpers). Read tools pull the live document buffer from the focused renderer via a synchronous IPC round-trip or a main-held mirror updated on edit debounce; write tools push suggestion/auto-edit instructions back to the renderer, which applies them via ProseMirror transactions. |
+
+### 17.2 Assistant UI (AI Elements + `@ai-sdk/react`)
+
+| ID | Requirement |
+|----|-------------|
+| TR-15.5 | The assistant panel (`src/renderer/components/AssistantPanel.tsx` or equivalent) composes AI Elements as specified in FR-14.11–FR-14.13: `Conversation` + `ConversationContent` + `ConversationScrollButton` for the thread; `PromptInput` + `PromptInputTextarea` + `PromptInputFooter` + `PromptInputSubmit` + `PromptInputSelect` for the composer and model picker; `Queue` + `QueueSection` + `QueueList` + `QueueItem` when the user submits additional prompts while a turn is streaming; `Shimmer` for in-flight tool calls and loading labels. |
+| TR-15.6 | The renderer uses `@ai-sdk/react` `useChat` (or an IPC-backed adapter with the same `messages` / `sendMessage` / `status` contract) wired to the main-process streaming handler. Assistant messages use AI Elements `Message`, `MessageContent`, and `MessageResponse` for rendering; tool parts use AI Elements `Tool` (or collapsible custom rows) where appropriate. |
+| TR-15.7 | Suggested prompts in the empty state use AI Elements `Suggestion` / `Suggestions` components (or `ConversationEmptyState` with child suggestion chips), populated from a small context-aware prompt list (FR-14.16). |
+| TR-15.8 | Relative model cost tiers ($ / $$ / $$$) are computed in `src/shared/ai/model-pricing.ts` by normalising gateway `pricing.input` + `pricing.output` across the user's enabled set; the model selector renders the tier beside each `PromptInputSelectItem`. |
+
+### 17.3 Agent loop, tools & heading references
+
+| ID | Requirement |
+|----|-------------|
+| TR-15.9 | The assistant agent is implemented with `streamText({ model: gateway(modelId), tools, maxSteps })` (or the current AI SDK agent equivalent), streaming tool-call and text parts back to the renderer as UI message stream chunks. |
+| TR-15.10 | `read_outline` returns heading nodes from the shared document index (TR-8.6) including stable **`headingId`** slugs (derived from heading text + position, matching outline identity). `read_document` may accept `headingId` or line/position ranges. |
+| TR-15.11 | **Heading reference tokens** in assistant messages use the scheme `heading://<headingId>` (or an equivalent internal URI). A custom markdown/link renderer in `MessageResponse` detects these tokens and renders them as clickable inline links; click handlers call the existing scroll-to-heading path used by the outline sidebar (FR-4.2 / TR-8.6), passing the resolved document position. |
+| TR-15.12 | When the user queues a prompt while `status === 'streaming'`, the prompt is appended to an in-memory queue surfaced by AI Elements `Queue`; queued items are submitted in order when the current turn completes, or the user may remove/cancel queued items individually. |
+
+### 17.4 Suggestion & auto-edit pipeline (Cursor-style)
+
+| ID | Requirement |
+|----|-------------|
+| TR-15.13 | **Suggestion mode** (`propose_edit`): the main process computes a text/markdown diff between the target range and proposed replacement (e.g. via `diff` library or ProseMirror `ReplaceStep` planning in shared code). The renderer applies the result as **ProseMirror decorations** — inline insertions (e.g. green/underlined) and deletions (e.g. red/strikethrough) — without mutating the document until the user accepts. Each suggestion carries a stable `suggestionId` for accept/reject. |
+| TR-15.14 | **Auto mode** (`apply_edit`): the renderer applies a single ProseMirror transaction replacing the target range, registered as one undo step (FR-14.33). Markdown-aware merge reuses the same serializer constraints as save (TR-8.1) so structure is preserved where the schema allows. |
+| TR-15.15 | Accept/reject IPC (`ai:suggestion:accept`, `ai:suggestion:reject`, bulk variants) removes decorations and either commits or discards the underlying steps. Failed `apply_edit` rolls back the transaction before any partial decoration is shown (FR-14.35). |
+| TR-15.16 | Pending suggestion count is derived from active decoration sets and pushed to the status bar / assistant header via the document store. |
+
+### 17.5 Model catalogue, errors & autocomplete
+
+| ID | Requirement |
+|----|-------------|
+| TR-15.17 | Model discovery calls `GET https://ai-gateway.vercel.sh/v1/models` (no auth required for listing) or AI SDK `gateway.getAvailableModels()`, cached in main with a TTL (e.g. 24h) and refreshed on demand from Preferences. Default enabled model IDs (FR-14.5) ship in `src/shared/ai/default-models.ts` and are validated against the live catalogue on first fetch. |
+| TR-15.18 | Gateway errors are normalised in `src/main/ai/gateway-errors.ts` into user-facing categories matching FR-14.36–FR-14.40 (insufficient credit, invalid key, rate limit, timeout, model unavailable). Insufficient-credit responses must surface a link to `https://vercel.com/docs/ai-gateway/pricing` (or the dashboard billing URL). |
+| TR-15.19 | **Inline autocomplete** (FR-14.41–FR-14.45) uses `generateText` or `streamText` with a small max-output token budget, triggered from an editor plugin on debounced idle (e.g. 300–500ms after last keystroke). Suggestions render as inline ghost text (ProseMirror widget decoration or Tiptap extension); Tab commits as one replace step; Esc or cursor movement dismisses. In-flight requests are aborted via `AbortController` on continued typing. Autocomplete is suppressed inside `codeBlock` nodes. |
+| TR-15.20 | When the AI master toggle is off, assistant panel and autocomplete extension are not mounted, no gateway connections are opened, and AI-related IPC handlers return a consistent "AI disabled" error without leaking key state. |
+
+---
+
+## 18. Open Technical Decisions
 
 - **DOCX conversion approach:** AST-driven (`docx.js`, per TR-10.2) vs. a simpler HTML-to-DOCX library as a faster v1 with lower fidelity — recommend starting with the AST-driven approach given the "round-trippable Word doc" open question in the functional spec, but flag as a decision to revisit if it proves too time-consuming for v1.
 - **Chart library beyond Mermaid** (TR-9.4): whether to add a dedicated charting library (e.g. Chart.js rendered from a custom fenced-block DSL) or rely solely on Mermaid's own chart types (`pie`, `xychart-beta`).
@@ -239,3 +295,6 @@ Being upfront about where this strategy stops, so effort isn't wasted chasing an
 - **State management library** (TR-2.10): confirm Zustand (or equivalent) vs. plain React context once the editor/sidebar/preview component tree is sketched out in detail.
 - **Style-override editing UI fidelity** (TR-11.4): confirm v1 scope is a simple settings form rather than a live visual theme designer, given this is called out as "optional/advanced" in the functional spec.
 - **Search library choice** (TR-2.12): `minisearch` vs. `fuse.js` for Document Search (FR-12.x) — both are small and dependency-light; the decision mainly comes down to ranking behavior preference once real usage is tried, and can be swapped without affecting the functional contract.
+- **AI IPC streaming transport** (TR-15.3): chunk-per-`ipcMain` event vs. a single long-lived `MessageChannel` for lower overhead on long assistant turns — prototype both if streaming feels laggy.
+- **Suggestion diff granularity** (TR-15.13): word-level vs. block-level track-changes decorations — start with block/paragraph-level for v1 simplicity; refine if multi-paragraph edits look too coarse.
+- **Heading ID stability** (TR-15.10): slug-from-text-only vs. text+position — position-inclusive IDs avoid collisions when duplicate heading titles exist, at the cost of IDs changing if headings above are inserted; document the trade-off in tool prompts.

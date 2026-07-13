@@ -1,0 +1,5 @@
+[
+  { "type": "ui-message-chunk", "chunk": { "type": "text-delta", "delta": "Hello" } },
+  { "type": "ui-message-chunk", "chunk": { "type": "text-delta", "delta": " world" } },
+  { "type": "done" }
+]

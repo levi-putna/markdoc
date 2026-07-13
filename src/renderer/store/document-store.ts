@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ViewMode, AppPreferences } from '@shared/ipc'
 import type { OutlineNode, DocumentSizeTier } from '@shared/types'
+import type { GatewayModelInfo } from '@shared/ai/model-pricing'
 import { DEFAULT_PREFERENCES } from '@shared/ipc'
 
 interface DocumentState {
@@ -27,6 +28,13 @@ interface DocumentState {
   styleOverrides: Record<string, string>
   brokenImages: Array<{ src: string; line: number }>
   highlightRange: { from: number; to: number } | null
+  assistantVisible: boolean
+  assistantWidth: number
+  pendingSuggestionCount: number
+  pendingSuggestionIds: string[]
+  suggestionResolutions: Record<string, 'accepted' | 'rejected'>
+  aiModels: GatewayModelInfo[]
+  documentSessionId: string
 }
 
 interface DocumentActions {
@@ -55,6 +63,20 @@ interface DocumentActions {
   setStyleOverrides: (overrides: Record<string, string>) => void
   setBrokenImages: (images: Array<{ src: string; line: number }>) => void
   setHighlightRange: (range: { from: number; to: number } | null) => void
+  toggleAssistant: () => void
+  setAssistantVisible: (visible: boolean) => void
+  setAssistantWidth: (width: number) => void
+  setPendingSuggestionCount: (count: number) => void
+  setPendingSuggestionIds: (ids: string[]) => void
+  setSuggestionResolution: ({
+    suggestionId,
+    status,
+  }: {
+    suggestionId: string
+    status: 'accepted' | 'rejected'
+  }) => void
+  clearSuggestionResolutions: () => void
+  setAiModels: (models: GatewayModelInfo[]) => void
   reset: () => void
 }
 
@@ -82,6 +104,13 @@ const initialState: DocumentState = {
   styleOverrides: {},
   brokenImages: [],
   highlightRange: null,
+  assistantVisible: false,
+  assistantWidth: 320,
+  pendingSuggestionCount: 0,
+  pendingSuggestionIds: [],
+  suggestionResolutions: {},
+  aiModels: [],
+  documentSessionId: crypto.randomUUID(),
 }
 
 /**
@@ -132,5 +161,16 @@ export const useDocumentStore = create<DocumentState & DocumentActions>((set) =>
   setStyleOverrides: (overrides) => set({ styleOverrides: overrides }),
   setBrokenImages: (images) => set({ brokenImages: images }),
   setHighlightRange: (range) => set({ highlightRange: range }),
-  reset: () => set({ ...initialState, collapsedOutlineIds: new Set() }),
+  toggleAssistant: () => set((s) => ({ assistantVisible: !s.assistantVisible })),
+  setAssistantVisible: (visible) => set({ assistantVisible: visible }),
+  setAssistantWidth: (width) => set({ assistantWidth: width }),
+  setPendingSuggestionCount: (count) => set({ pendingSuggestionCount: count }),
+  setPendingSuggestionIds: (ids) => set({ pendingSuggestionIds: ids }),
+  setSuggestionResolution: ({ suggestionId, status }) =>
+    set((state) => ({
+      suggestionResolutions: { ...state.suggestionResolutions, [suggestionId]: status },
+    })),
+  clearSuggestionResolutions: () => set({ suggestionResolutions: {} }),
+  setAiModels: (models) => set({ aiModels: models }),
+  reset: () => set({ ...initialState, collapsedOutlineIds: new Set(), documentSessionId: crypto.randomUUID() }),
 }))

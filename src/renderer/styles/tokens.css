@@ -26,6 +26,8 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+  --control-height: 28px;
+  --control-padding-x: 8px;
   --duration-fast: 140ms;
   --duration-panel: 220ms;
   --editor-font-size: 16px;

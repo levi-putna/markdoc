@@ -1,8 +1,56 @@
 @import './tokens.css';
+@import 'streamdown/styles.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 11%;
+    --primary: 211 100% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 40 9% 96%;
+    --secondary-foreground: 0 0% 11%;
+    --muted: 40 9% 96%;
+    --muted-foreground: 0 0% 43%;
+    --accent-shadcn: 40 9% 96%;
+    --accent-foreground: 0 0% 11%;
+    --destructive: 4 90% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 211 100% 52%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 0 0% 12%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 211 100% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 60%;
+    --accent-shadcn: 0 0% 18%;
+    --accent-foreground: 0 0% 95%;
+    --destructive: 4 90% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
+    --ring: 211 100% 52%;
+  }
+}
 
 * {
   box-sizing: border-box;
@@ -55,6 +103,220 @@ body {
 
 .outline-sidebar-surface {
   background: color-mix(in srgb, var(--surface-sidebar) 55%, transparent);
+}
+
+/* Assistant panel — opaque white body, compact composer */
+.assistant-panel {
+  background: var(--surface-primary);
+}
+
+.assistant-panel__composer {
+  background: var(--surface-primary);
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Assistant thread — chrome density (13px type, 8px rhythm per design-guide) */
+.assistant-panel .assistant-conversation-content {
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.assistant-panel .assistant-message-content {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.assistant-panel .assistant-message-body p + p {
+  margin-top: 0.375rem;
+}
+
+.assistant-panel .assistant-message-body ul,
+.assistant-panel .assistant-message-body ol {
+  margin: 0.375rem 0;
+  padding-left: 1.125rem;
+}
+
+.assistant-panel .assistant-message-body li + li {
+  margin-top: 0.125rem;
+}
+
+.assistant-panel .assistant-message-body pre,
+.assistant-panel .assistant-message-body code {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Tool activity row — shimmer sweeps icon + label while running */
+.assistant-tool-activity--running {
+  position: relative;
+  overflow: hidden;
+}
+
+.assistant-tool-activity--running::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 10%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: assistant-tool-shimmer-sweep 1.5s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes assistant-tool-shimmer-sweep {
+  from {
+    background-position: 200% center;
+  }
+
+  to {
+    background-position: -200% center;
+  }
+}
+
+.assistant-prompt-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.assistant-prompt-input [data-slot='input-group'] {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--surface-primary);
+  box-shadow: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.assistant-prompt-input [data-slot='input-group-addon'][data-align='block-end'] {
+  min-width: 0;
+  width: 100%;
+}
+
+/* Composer action bar — model fills leftover space; mode + submit stay fixed width */
+.assistant-composer-footer {
+  width: 100%;
+  min-width: 0;
+  padding: 6px !important;
+}
+
+.assistant-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.assistant-composer-actions__model {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.assistant-composer-actions__model [role='combobox'] {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.assistant-composer-actions__model [data-radix-select-value] {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.assistant-composer-actions__controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  width: calc(var(--control-height) * 2 + 4px);
+}
+
+.assistant-prompt-input [data-slot='input-group']:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+  background: var(--surface-primary);
+  box-shadow: none;
+}
+
+.assistant-prompt-input
+  [data-slot='input-group']:has([data-slot='input-group-control']:focus-visible),
+.assistant-prompt-input [data-slot='input-group']:has([role='combobox']:focus-visible) {
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+  box-shadow: none;
+}
+
+.assistant-prompt-input [data-slot='input-group-control'] {
+  background: transparent;
+}
+
+.assistant-prompt-input [data-slot='input-group-control']:focus-visible {
+  outline: none;
+}
+
+/* Composer selects and submit — no per-control focus chrome */
+.assistant-prompt-input [data-slot='input-group'] [role='combobox'],
+.assistant-prompt-input [data-slot='input-group'] [role='combobox']:focus,
+.assistant-prompt-input [data-slot='input-group'] [role='combobox']:focus-visible {
+  outline: none;
+  box-shadow: none;
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+}
+
+.assistant-prompt-input [data-slot='input-group'] button[type='submit']:focus-visible {
+  outline: none;
+}
+
+.assistant-suggestion {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-primary);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--content-text);
+  transition: background-color 120ms ease;
+}
+
+.assistant-suggestion:hover {
+  background: color-mix(in srgb, var(--content-text) 5%, var(--surface-primary));
+}
+
+/* Native macOS button chrome overrides custom backgrounds — reset for app UI */
+button:not([role='switch']) {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+select,
+input:not([type='checkbox']):not([type='radio']),
+textarea {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 /* Opaque fallback for contexts without window vibrancy (e.g. Preferences) */
@@ -1020,4 +1282,327 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* AI suggestion track-changes decorations */
+.tiptap .ai-suggestion-delete {
+  background: color-mix(in srgb, #ef4444 22%, transparent);
+  color: color-mix(in srgb, #ef4444 88%, var(--content-text));
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+  border-radius: 2px;
+  box-decoration-break: clone;
+}
+
+.tiptap .ai-suggestion-delete--active {
+  background: color-mix(in srgb, #ef4444 30%, transparent);
+  outline: 1px solid color-mix(in srgb, #ef4444 35%, transparent);
+}
+
+.tiptap .ai-suggestion-hunk {
+  display: inline;
+  white-space: pre-wrap;
+}
+
+.tiptap .ai-suggestion-hunk[data-active='true'] {
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 25%, transparent);
+}
+
+.tiptap .ai-suggestion-insert {
+  display: inline;
+  background: color-mix(in srgb, #22c55e 20%, transparent);
+  color: #15803d;
+  border-radius: 2px;
+  padding: 0 1px;
+  white-space: pre-wrap;
+  box-decoration-break: clone;
+}
+
+.tiptap .ai-suggestion-insert--active {
+  background: color-mix(in srgb, #22c55e 28%, transparent);
+  outline: 1px solid color-mix(in srgb, #22c55e 35%, transparent);
+}
+
+/* Shared review action controls */
+.suggestion-review-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.suggestion-review-actions--inline {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.suggestion-review-actions--bar {
+  width: 100%;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.suggestion-review-actions--assistant {
+  justify-content: flex-end;
+}
+
+.suggestion-review-actions__group {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-primary);
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 4%, transparent);
+}
+
+.suggestion-review-actions__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.suggestion-review-actions__btn + .suggestion-review-actions__btn {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.suggestion-review-actions__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.suggestion-review-actions__btn--reject {
+  color: #b91c1c;
+}
+
+.suggestion-review-actions__btn--reject:hover:not(:disabled) {
+  background: color-mix(in srgb, #ef4444 10%, var(--surface-primary));
+}
+
+.suggestion-review-actions__btn--accept {
+  color: #15803d;
+}
+
+.suggestion-review-actions__btn--accept:hover:not(:disabled) {
+  background: color-mix(in srgb, #22c55e 12%, var(--surface-primary));
+}
+
+.suggestion-review-actions__batch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.suggestion-review-actions__batch-btn {
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--content-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.suggestion-review-actions__batch-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-secondary) 80%, transparent);
+}
+
+.suggestion-review-actions__batch-btn--accent {
+  color: #15803d;
+}
+
+.suggestion-review-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.suggestion-review-status--accepted,
+.suggestion-review-status--applied {
+  background: color-mix(in srgb, #22c55e 14%, transparent);
+  color: #15803d;
+}
+
+.suggestion-review-status--rejected {
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+  color: #b91c1c;
+}
+
+.ai-suggestion-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface-primary));
+  padding: 8px 12px;
+}
+
+.ai-suggestion-bar__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ai-suggestion-bar__row--actions {
+  justify-content: flex-end;
+}
+
+.ai-suggestion-bar__summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-suggestion-bar__title {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--content-text);
+}
+
+.ai-suggestion-bar__meta {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--content-secondary);
+}
+
+.ai-suggestion-bar__nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-suggestion-bar__nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-primary);
+  color: var(--content-secondary);
+  cursor: pointer;
+}
+
+.ai-suggestion-bar__nav:hover:not(:disabled) {
+  background: var(--surface-secondary);
+}
+
+.ai-suggestion-bar__nav:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.assistant-edit-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-sidebar) 12%, var(--surface-primary));
+  padding: 8px;
+}
+
+.assistant-edit-result__content {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.assistant-edit-result__icon {
+  margin-top: 1px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--content-secondary);
+}
+
+.assistant-edit-result__copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.assistant-edit-result__title {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--content-text);
+}
+
+.assistant-edit-result__meta {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--content-secondary);
+}
+
+.assistant-edit-result__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assistant-edit-result__focus {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--brand);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.assistant-suggestion-review-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, #22c55e 6%, var(--surface-primary));
+  padding: 8px 10px;
+}
+
+.assistant-suggestion-review-strip__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.assistant-suggestion-review-strip__title {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--content-text);
+}
+
+.assistant-suggestion-review-strip__meta {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--content-secondary);
+}
+
+.tiptap .ai-autocomplete-ghost {
+  color: var(--content-text-secondary);
+  opacity: 0.55;
+  pointer-events: none;
 }

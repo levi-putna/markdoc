@@ -21,6 +21,7 @@ Primary goals: catch regressions in Markdown round-trip fidelity (the riskiest a
 | QR-1.2 | Markdown round-trip conversion (Tiptap document model ⇄ Markdown text, `technical-requirements.md` TR-2.3/TR-8.1) must have unit test coverage for every GFM construct listed in `functional-requirements.md` Section 8, not just a happy-path subset. |
 | QR-1.3 | Target coverage: ≥80% line coverage for `src/shared` (converters, style-schema logic) and `src/main` (file I/O, IPC handlers, CLI/single-instance logic); UI component coverage is best-effort and secondary to integration/E2E coverage for the editor itself, since Tiptap/ProseMirror behavior is better verified through realistic interaction tests than isolated unit tests. |
 | QR-1.4 | Every bug fix for a user-reported issue must land with a regression test (unit, integration, or E2E as appropriate) that fails before the fix and passes after. |
+| QR-1.5 | **AI / gateway tests** must never call the live Vercel AI Gateway in CI. All assistant, tool, and autocomplete tests use mocked IPC responses or fixture stream chunks. A separate, manual optional smoke test against a real gateway key may be documented for pre-release only. |
 
 ### 2.2 Tooling
 
@@ -54,8 +55,8 @@ Primary goals: catch regressions in Markdown round-trip fidelity (the riskiest a
 
 | ID | Requirement |
 |----|-------------|
-| QR-5.1 | Automated accessibility checks (e.g. `axe-core` run against rendered renderer DOM via Playwright) must run against the main editor, preview, sidebar, and export dialogs to catch obvious issues (missing labels, contrast, focus traps). |
-| QR-5.2 | A manual VoiceOver smoke-test pass (Section 3.5) is required before each release, covering: opening a document, navigating the outline tree, and using core formatting commands via keyboard only. |
+| QR-5.1 | Automated accessibility checks (e.g. `axe-core` run against rendered renderer DOM via Playwright) must run against the main editor, preview, sidebar, **assistant panel**, and export dialogs to catch obvious issues (missing labels, contrast, focus traps). |
+| QR-5.2 | A manual VoiceOver smoke-test pass (Section 3.5) is required before each release, covering: opening a document, navigating the outline tree, using core formatting commands via keyboard only, and **using the assistant panel** (focus composer, send a message, accept/reject a suggestion via keyboard). |
 
 ### 2.6 CI/CD Gating
 
@@ -72,6 +73,8 @@ Primary goals: catch regressions in Markdown round-trip fidelity (the riskiest a
 | QR-7.1 | A fixtures directory must contain: (a) a document exercising every GFM construct in `functional-requirements.md` Section 8, individually and in combination; (b) documents with valid and deliberately invalid Mermaid diagrams; (c) documents with front matter, with and without body content; (d) documents referencing images via relative paths, including at least one intentionally broken reference; (e) a document with a style-override sidecar file applied. |
 | QR-7.2 | Where practical, the CommonMark spec's official test suite (or a representative subset) should be used to validate baseline Markdown parsing/serialization fidelity, supplementing MarkDoc-specific fixtures. |
 | QR-7.3 | Fixtures must be treated as test code: reviewed in PRs, and updated deliberately (not silently) when intentional behavior changes require updating an expected snapshot. |
+| QR-7.4 | AI fixtures must include: (a) serialised `UIMessage[]` conversation threads for per-document history tests; (b) mocked gateway stream chunks (text, tool-call, tool-result, error) for assistant UI tests; (c) mock gateway error payloads for insufficient credit (402/403), invalid key (401), rate limit (429), and timeout; (d) a short document with duplicate heading titles for heading-reference collision tests. |
+| QR-7.5 | A test double for the main-process AI handler (`src/main/ai/__mocks__/` or Playwright route intercept) must be checked in so integration tests can drive full assistant turns without network access. |
 
 ---
 
@@ -268,9 +271,41 @@ Each row is a representative test case; area codes map to `functional-requiremen
 | TC-PERF.6 | Running Find & Replace (FR-2.4) and Document Search (FR-12.x) against the Large-tier fixture completes without a sustained UI freeze, confirming the incremental/chunked scan behavior in TR-12.10. | Integration |
 | TC-PERF.7 | Memory usage after opening and lightly editing the Large-tier fixture is captured and compared against the recorded baseline (QR-4.3), flagging (not failing) on regression beyond the agreed threshold. | Performance (nightly) |
 
+**AI Assistant (`TC-AI`) — verifies FR-14.x, `technical-requirements.md` Section 17**
+
+| ID | Test Case | Level |
+|----|-----------|-------|
+| TC-AI.1 | With AI disabled (default), the assistant panel shows the Preferences empty state; no gateway IPC calls are made when the panel is opened. | Integration |
+| TC-AI.2 | Enabling AI in Preferences without a gateway key blocks send; with a mocked valid key, the first send shows the disclosure confirmation once, then allows subsequent sends. | Integration |
+| TC-AI.3 | Sending a message streams assistant text into the `Conversation` thread; `ConversationScrollButton` appears when scrolled up and returns to the latest message on click. | Component + Integration |
+| TC-AI.4 | Submitting a second prompt while streaming enqueues it in AI Elements `Queue`; queued items appear under a pending section and are submitted in order when the current turn completes. | Integration |
+| TC-AI.5 | A mocked tool call in progress shows a `Shimmer` (or loading) label; completed tool calls collapse to a summary row in the thread. | Component |
+| TC-AI.6 | Mocked `propose_edit` in Suggestion mode renders track-changes decorations in the editor without mutating saved content; Accept merges, Reject removes decorations with no document change. | Integration |
+| TC-AI.7 | Mocked `apply_edit` in Auto mode applies the edit immediately and registers a single Undo step that restores the prior content. | Integration |
+| TC-AI.8 | Failed `apply_edit` / `propose_edit` (mocked gateway or tool error) leaves no orphan decorations or partial edits (FR-14.35). | Integration |
+| TC-AI.9 | Conversation history for document A is persisted locally; switching to document B loads B's thread; switching back to A restores A's thread (FR-14.18–FR-14.19). | Integration |
+| TC-AI.10 | "New conversation" clears the visible thread for the current document; "Clear all AI history" in Preferences removes stored conversation files. | Integration |
+| TC-AI.11 | A `heading://` reference token in an assistant message renders as a clickable link; clicking it scrolls the editor to the matching heading (same destination as outline click, FR-4.2). | Integration |
+| TC-AI.12 | Context menu "Ask Assistant" with a selection focuses the panel and attaches selection context to the next send. | Integration |
+| TC-AI.13 | Mocked insufficient-credit gateway error shows a user-friendly message with a billing link; no automatic retry occurs. | Unit + Integration |
+| TC-AI.14 | Mocked 401 (invalid key) and 429 (rate limit) errors surface the correct user-facing messages (FR-14.37–FR-14.38). | Unit |
+| TC-AI.15 | Model selector lists only user-enabled models; each entry shows a cost tier ($ / $$ / $$$) derived from fixture pricing data. | Component |
+| TC-AI.16 | Assistant panel is collapsible/resizable; width and visibility persist across window state restoration (FR-14.9). | Integration |
+| TC-AI.17 | Suggested prompts in the empty state adapt to context (long doc vs selection vs empty doc) and send on click. | Component |
+
+**AI Inline Autocomplete (`TC-AIA`) — verifies FR-14.41–FR-14.46**
+
+| ID | Test Case | Level |
+|----|-----------|-------|
+| TC-AIA.1 | With AI disabled, no ghost text appears while typing. | Integration |
+| TC-AIA.2 | With AI enabled and a mocked suggestion response, ghost text appears after the cursor; Tab accepts and inserts text as one undoable step; Esc dismisses without changing the document. | Integration |
+| TC-AIA.3 | Continuing to type after a suggestion is requested cancels the in-flight mocked request and clears ghost text. | Integration |
+| TC-AIA.4 | Autocomplete does not trigger inside a fenced/code block node. | Component |
+| TC-AIA.5 | When the mocked gateway is unreachable, autocomplete fails silently (no ghost text, no crash). | Integration |
+
 ### 3.4 Regression / Smoke Suite (Per-PR Gate)
 
-A fast subset (~15–20 test cases, target under 5 minutes total) must run on every PR, covering at minimum: TC-EDIT.1–2, TC-PREVIEW.1, TC-OUTLINE.3, TC-OUTLINE.6, TC-OUTLINE.9, TC-HEADER.2–3, TC-SEARCH.1–2, TC-FILE.1–2, TC-FILE.7, TC-FILE.9, TC-CLI.2, TC-MD.1–2 (subset), TC-DIAG.1–2, TC-STYLE.1, TC-IMG.1, TC-EXPORT.1–2, TC-PERF.2. The full suite in Section 3.3 runs pre-release and on main-branch merges (QR-6.1/QR-6.2); the nightly-only performance cases (TC-PERF.1, .3, .5, .7 — QR-4.1) run on their own schedule rather than gating every PR.
+A fast subset (~15–20 test cases, target under 5 minutes total) must run on every PR, covering at minimum: TC-EDIT.1–2, TC-PREVIEW.1, TC-OUTLINE.3, TC-OUTLINE.6, TC-OUTLINE.9, TC-HEADER.2–3, TC-SEARCH.1–2, TC-FILE.1–2, TC-FILE.7, TC-FILE.9, TC-CLI.2, TC-MD.1–2 (subset), TC-DIAG.1–2, TC-STYLE.1, TC-IMG.1, TC-EXPORT.1–2, TC-PERF.2, **TC-AI.1, TC-AI.6–7, TC-AI.9, TC-AI.13, TC-AIA.1–2**. The full suite in Section 3.3 runs pre-release and on main-branch merges (QR-6.1/QR-6.2); the nightly-only performance cases (TC-PERF.1, .3, .5, .7 — QR-4.1) run on their own schedule rather than gating every PR.
 
 ### 3.5 Manual QA Checklist (Pre-Release)
 
@@ -287,6 +322,7 @@ Items that are impractical or low-value to fully automate, to be walked through 
 - Design conformance pass against `design-guide.md`: typography scale, colour tokens, spacing/icon sizing, sidebar row metrics, syntax-reveal-on-cursor-line behaviour (FR-2.2a), and motion durations match the guide in both light and dark mode.
 - Install a downloaded, notarized build on a clean machine (no dev certificates installed) and confirm no Gatekeeper warning appears.
 - Auto-update dry run (TC-UPDATE.7): install the previous release, publish the new one via `yarn release`, and confirm the running app finds it, downloads it in the background, and successfully restarts into the new version. Also confirm that starting the restart prompt while a document has unsaved changes does *not* offer to install until the document is saved or closed.
+- **AI manual smoke (optional, requires user's gateway key):** enable AI, send a summarise prompt, verify streaming response, verify Suggestion-mode edit accept/reject on a short fixture document, verify conversation persists after close/reopen of the same file.
 - Visual inspection of one exported PDF and one exported DOCX file opened in Preview.app and Microsoft Word/Pages respectively, confirming they look correct to a human, not just structurally correct to an automated parser.
 
 ### 3.6 Release Exit Criteria

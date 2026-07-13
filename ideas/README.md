@@ -65,9 +65,8 @@ These are brainstorming artefacts — not committed scope. Use them to evaluate,
 
 | Document | Summary | Status |
 |----------|---------|--------|
-| [ai-inline-autocomplete.md](./ai-assisted/ai-inline-autocomplete.md) | Ghost-text continue-writing suggestions | Idea |
-| [ai-summarize-rewrite.md](./ai-assisted/ai-summarize-rewrite.md) | Summarise, rewrite, and tone-adjust selection | Idea |
-| [ai-doc-summaries.md](./ai-assisted/ai-doc-summaries.md) | AI-generated outline summaries and commit messages | Idea |
+| [ai-inline-autocomplete.md](./ai-assisted/ai-inline-autocomplete.md) | Ghost-text continue-writing suggestions | **Promoted** → FR-14.41–FR-14.46 |
+| [ai-document-assistant.md](./ai-assisted/ai-document-assistant.md) | Side assistant: chat, Q&A, selection edits, read/write tools, suggestion vs auto | **Promoted** → Section 18 (`functional-requirements.md`) |
 
 ### Power user and accessibility
 

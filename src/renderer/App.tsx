@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/react'
 import { useDocumentStore } from './store/document-store'
 import { Toolbar } from './components/Toolbar'
 import { OutlineSidebar } from './components/OutlineSidebar'
+import { AssistantPanel } from './components/AssistantPanel'
 import { MarkdocEditor } from './components/MarkdocEditor'
 import { MarkdownSourceEditor } from './components/MarkdownSourceEditor'
 import { PreviewPane } from './components/PreviewPane'
@@ -20,6 +21,14 @@ import {
 import type { FlatOutlineItem } from '@shared/types'
 import type { StyleOverride, WindowState } from '@shared/ipc'
 import { useAppTheme } from './hooks/use-app-theme'
+import {
+  buildDocumentSnapshot,
+  registerDocumentSnapshotBridge,
+} from './lib/document-snapshot'
+import { aiSuggestionsKey, registerSuggestionActionHandler } from '@shared/ai-suggestions'
+import { resolveEditRange, summariseEdit } from '@shared/ai-edit-positions'
+import { buildReplacementSlice, resolveSuggestionRange } from '@shared/ai-suggestion-apply'
+import type { SuggestionDecorationPayload } from '@shared/ai/types'
 
 /**
  * Main document window layout composing toolbar, sidebar, editor, and preview.
@@ -55,6 +64,7 @@ function DocumentWindow() {
     preferences,
     setPreferences,
     setOutline,
+    wordCount,
     setWordCount,
     setCharCount,
     setReadingTimeMinutes,
@@ -67,6 +77,19 @@ function DocumentWindow() {
     setHighlightRange,
     setViewMode,
     setSidebarWidth,
+    assistantVisible,
+    assistantWidth,
+    setAssistantVisible,
+    setAssistantWidth,
+    pendingSuggestionCount,
+    pendingSuggestionIds,
+    suggestionResolutions,
+    setPendingSuggestionCount,
+    setPendingSuggestionIds,
+    setSuggestionResolution,
+    clearSuggestionResolutions,
+    documentSessionId,
+    setAiModels,
   } = useDocumentStore()
 
   const [previewHtml, setPreviewHtml] = useState('')
@@ -80,8 +103,14 @@ function DocumentWindow() {
   const scrollNonce = useRef(0)
   const [scrollToChar, setScrollToChar] = useState<number | null>(null)
   const [splitScrollRatio, setSplitScrollRatio] = useState<number | null>(null)
+  const [assistantPrefill, setAssistantPrefill] = useState<string | null>(null)
+  const [hasSelection, setHasSelection] = useState(false)
   const [styleDraft, setStyleDraft] = useState<StyleOverride>({ version: 1 })
   const editorRef = useRef<Editor | null>(null)
+  const pendingSuggestionPayloadsRef = useRef<
+    Array<SuggestionDecorationPayload & { autoApply?: boolean }>
+  >([])
+  const flushPendingSuggestionsRef = useRef<((editor: Editor) => void) | null>(null)
   const recoveryInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useSearchShortcut()
@@ -121,6 +150,8 @@ function DocumentWindow() {
         viewMode,
         sidebarVisible,
         sidebarWidth,
+        assistantVisible,
+        assistantWidth,
       }
       void window.markdoc.saveWindowState(state)
     }
@@ -131,7 +162,7 @@ function DocumentWindow() {
       window.removeEventListener('beforeunload', saveState)
       saveState()
     }
-  }, [filePath, viewMode, sidebarVisible, sidebarWidth])
+  }, [filePath, viewMode, sidebarVisible, sidebarWidth, assistantVisible, assistantWidth])
 
   // Restore window state from previous session
   useEffect(() => {
@@ -140,13 +171,174 @@ function DocumentWindow() {
       setViewMode(state.viewMode)
       if (!state.sidebarVisible) useDocumentStore.getState().toggleSidebar()
       setSidebarWidth(state.sidebarWidth)
+      setAssistantVisible(state.assistantVisible ?? false)
+      setAssistantWidth(state.assistantWidth ?? 320)
     })
-  }, [setViewMode, setSidebarWidth])
+  }, [setViewMode, setSidebarWidth, setAssistantVisible, setAssistantWidth])
 
   // Load preferences on mount (theme handling lives in useAppTheme)
   useEffect(() => {
     window.markdoc?.getPreferences().then(setPreferences)
   }, [setPreferences])
+
+  // Load AI model catalogue when AI is enabled
+  useEffect(() => {
+    if (!window.markdoc || !preferences.aiEnabled) return
+    void window.markdoc.listAiModels().then(({ models }) => setAiModels(models))
+  }, [preferences.aiEnabled, setAiModels])
+
+  // Bridge live document snapshot for main-process AI tools
+  useEffect(() => {
+    return registerDocumentSnapshotBridge({
+      getSnapshot: () =>
+        buildDocumentSnapshot({
+          editor: editorRef.current,
+          filePath,
+          markdown,
+          outline,
+        }),
+    })
+  }, [filePath, markdown, outline])
+
+  // Apply AI suggestion decorations from the main process
+  useEffect(() => {
+    if (!window.markdoc) return
+
+    const syncSuggestions = () => {
+      const editor = editorRef.current
+      if (!editor) return
+      const suggestions = aiSuggestionsKey.getState(editor.state)?.suggestions ?? []
+      setPendingSuggestionCount(suggestions.length)
+      setPendingSuggestionIds(suggestions.map((suggestion) => suggestion.suggestionId))
+    }
+
+    const applySuggestionToEditor = ({
+      editor,
+      payload,
+      autoApply = false,
+    }: {
+      editor: Editor
+      payload: SuggestionDecorationPayload & { autoApply?: boolean }
+      autoApply?: boolean
+    }) => {
+      const resolved = resolveEditRange({
+        doc: editor.state.doc,
+        from: payload.from,
+        to: payload.to,
+        originalText: payload.originalText,
+      })
+
+      if (!resolved) {
+        console.warn('[assistant] Could not resolve edit range for suggestion', payload)
+        return
+      }
+
+      const summary =
+        payload.summary ??
+        summariseEdit({
+          originalText: resolved.originalText,
+          replacement: payload.replacement,
+          rationale: payload.rationale,
+        })
+
+      if (autoApply || payload.autoApply) {
+        const resolvedForApply = resolveSuggestionRange({
+          editor,
+          from: resolved.from,
+          to: resolved.to,
+          originalText: resolved.originalText,
+        })
+        if (!resolvedForApply) return
+
+        const slice = buildReplacementSlice({ editor, replacement: payload.replacement })
+        const tr = editor.state.tr.replaceRange(resolvedForApply.from, resolvedForApply.to, slice)
+        editor.view.dispatch(tr)
+        setDirty(true)
+        return
+      }
+
+      setViewMode('edit')
+      editor
+        .chain()
+        .addAiSuggestion({
+          suggestionId: payload.suggestionId,
+          from: resolved.from,
+          to: resolved.to,
+          replacement: payload.replacement,
+          originalText: resolved.originalText,
+          rationale: payload.rationale,
+          summary,
+        })
+        .focusAiSuggestion(payload.suggestionId)
+        .run()
+      syncSuggestions()
+    }
+
+    flushPendingSuggestionsRef.current = (editor) => {
+      const queue = pendingSuggestionPayloadsRef.current
+      pendingSuggestionPayloadsRef.current = []
+      for (const payload of queue) {
+        applySuggestionToEditor({ editor, payload })
+      }
+    }
+
+    const unsubApply = window.markdoc.onSuggestionApply((payload) => {
+      const editor = editorRef.current
+      if (!editor) {
+        pendingSuggestionPayloadsRef.current.push(payload)
+        return
+      }
+      applySuggestionToEditor({ editor, payload })
+    })
+
+    const unsubAccept = window.markdoc.onSuggestionAccept(({ suggestionId }) => {
+      editorRef.current?.commands.acceptAiSuggestion(suggestionId)
+      setDirty(true)
+      setSuggestionResolution({ suggestionId, status: 'accepted' })
+      syncSuggestions()
+    })
+    const unsubReject = window.markdoc.onSuggestionReject(({ suggestionId }) => {
+      editorRef.current?.commands.rejectAiSuggestion(suggestionId)
+      setSuggestionResolution({ suggestionId, status: 'rejected' })
+      syncSuggestions()
+    })
+    const unsubAcceptAll = window.markdoc.onSuggestionAcceptAll(() => {
+      editorRef.current?.commands.acceptAllAiSuggestions()
+      setDirty(true)
+      setPendingSuggestionCount(0)
+      setPendingSuggestionIds([])
+    })
+    const unsubRejectAll = window.markdoc.onSuggestionRejectAll(() => {
+      editorRef.current?.commands.rejectAllAiSuggestions()
+      setPendingSuggestionCount(0)
+      setPendingSuggestionIds([])
+    })
+
+    const unsubInlineActions = registerSuggestionActionHandler(({ action, suggestionId }) => {
+      const editor = editorRef.current
+      if (!editor) return
+
+      if (action === 'accept') {
+        editor.commands.acceptAiSuggestion(suggestionId)
+        setDirty(true)
+        setSuggestionResolution({ suggestionId, status: 'accepted' })
+      } else {
+        editor.commands.rejectAiSuggestion(suggestionId)
+        setSuggestionResolution({ suggestionId, status: 'rejected' })
+      }
+
+      syncSuggestions()
+    })
+
+    return () => {
+      unsubApply()
+      unsubAccept()
+      unsubReject()
+      unsubAcceptAll()
+      unsubRejectAll()
+      unsubInlineActions()
+    }
+  }, [setDirty, setPendingSuggestionCount, setPendingSuggestionIds, setSuggestionResolution, setViewMode])
 
   const loadStyleForDocument = useCallback(async (path: string) => {
     if (!window.markdoc) return
@@ -281,6 +473,7 @@ function DocumentWindow() {
       window.markdoc.onMenuAction('save', () => handleSave()),
       window.markdoc.onMenuAction('save-as', () => handleSaveAs()),
       window.markdoc.onMenuAction('toggle-sidebar', () => useDocumentStore.getState().toggleSidebar()),
+      window.markdoc.onMenuAction('toggle-assistant', () => useDocumentStore.getState().toggleAssistant()),
       window.markdoc.onMenuAction('view-mode', (mode) =>
         useDocumentStore.getState().setViewMode(mode as 'edit' | 'markdown' | 'preview' | 'split')
       ),
@@ -339,6 +532,8 @@ function DocumentWindow() {
 
   const handleEditorReady = useCallback(({ editor }: { editor: Editor }) => {
     editorRef.current = editor
+    setHasSelection(!editor.state.selection.empty)
+    flushPendingSuggestionsRef.current?.(editor)
   }, [])
 
   const handleEditorContentChange = useCallback(
@@ -460,6 +655,73 @@ function DocumentWindow() {
     setImageInsertOpen(true)
   }, [])
 
+  const handleJumpToHeadingId = useCallback(
+    (headingId: string) => {
+      const item = flattenOutline(outline).find((entry) => entry.id === headingId)
+      if (item) handleJumpToOutline(item)
+    },
+    [outline, handleJumpToOutline]
+  )
+
+  const handleAskAssistant = useCallback(
+    ({ text }: { text: string }) => {
+      setAssistantVisible(true)
+      setAssistantPrefill(`Regarding this selection:\n\n> ${text}\n\n`)
+    },
+    [setAssistantVisible]
+  )
+
+  const handleOpenPreferences = useCallback(() => {
+    void window.markdoc?.openPreferences()
+  }, [])
+
+  const handleAcceptSuggestion = useCallback(
+    ({ suggestionId }: { suggestionId: string }) => {
+      editorRef.current?.commands.acceptAiSuggestion(suggestionId)
+      setDirty(true)
+      setSuggestionResolution({ suggestionId, status: 'accepted' })
+      const suggestions = editorRef.current
+        ? aiSuggestionsKey.getState(editorRef.current.state)?.suggestions ?? []
+        : []
+      setPendingSuggestionCount(suggestions.length)
+      setPendingSuggestionIds(suggestions.map((suggestion) => suggestion.suggestionId))
+    },
+    [setDirty, setPendingSuggestionCount, setPendingSuggestionIds, setSuggestionResolution]
+  )
+
+  const handleRejectSuggestion = useCallback(
+    ({ suggestionId }: { suggestionId: string }) => {
+      editorRef.current?.commands.rejectAiSuggestion(suggestionId)
+      setSuggestionResolution({ suggestionId, status: 'rejected' })
+      const suggestions = editorRef.current
+        ? aiSuggestionsKey.getState(editorRef.current.state)?.suggestions ?? []
+        : []
+      setPendingSuggestionCount(suggestions.length)
+      setPendingSuggestionIds(suggestions.map((suggestion) => suggestion.suggestionId))
+    },
+    [setPendingSuggestionCount, setPendingSuggestionIds, setSuggestionResolution]
+  )
+
+  const handleAcceptAllSuggestions = useCallback(() => {
+    editorRef.current?.commands.acceptAllAiSuggestions()
+    setDirty(true)
+    setPendingSuggestionCount(0)
+    setPendingSuggestionIds([])
+    clearSuggestionResolutions()
+  }, [setDirty, setPendingSuggestionCount, setPendingSuggestionIds, clearSuggestionResolutions])
+
+  const handleRejectAllSuggestions = useCallback(() => {
+    editorRef.current?.commands.rejectAllAiSuggestions()
+    setPendingSuggestionCount(0)
+    setPendingSuggestionIds([])
+    clearSuggestionResolutions()
+  }, [setPendingSuggestionCount, setPendingSuggestionIds, clearSuggestionResolutions])
+
+  const handleFocusSuggestion = useCallback(({ suggestionId }: { suggestionId: string }) => {
+    setViewMode('edit')
+    editorRef.current?.commands.focusAiSuggestion(suggestionId)
+  }, [setViewMode])
+
   const flatOutline = flattenOutline(outline)
   const outlineTexts = flatOutline.map((i) => ({ text: i.text, pos: i.pos }))
 
@@ -493,6 +755,8 @@ function DocumentWindow() {
               onContentChange={handleEditorContentChange}
               scrollToPos={scrollToPos}
               onInsertImage={handleOpenImageDialog}
+              onAskAssistant={handleAskAssistant}
+              onSelectionChange={({ hasSelection: selected }) => setHasSelection(selected)}
             />
           </div>
 
@@ -522,6 +786,26 @@ function DocumentWindow() {
             </div>
           )}
         </div>
+
+        {assistantVisible && (
+          <AssistantPanel
+            sessionId={documentSessionId}
+            hasSelection={hasSelection}
+            isDocumentEmpty={wordCount === 0}
+            prefillText={assistantPrefill}
+            onPrefillConsumed={() => setAssistantPrefill(null)}
+            onHeadingClick={handleJumpToHeadingId}
+            onOpenPreferences={handleOpenPreferences}
+            pendingSuggestionCount={pendingSuggestionCount}
+            pendingSuggestionIds={pendingSuggestionIds}
+            suggestionResolutions={suggestionResolutions}
+            onAcceptSuggestion={handleAcceptSuggestion}
+            onRejectSuggestion={handleRejectSuggestion}
+            onAcceptAllSuggestions={handleAcceptAllSuggestions}
+            onRejectAllSuggestions={handleRejectAllSuggestions}
+            onFocusSuggestion={handleFocusSuggestion}
+          />
+        )}
       </div>
 
       {/* Search overlay */}

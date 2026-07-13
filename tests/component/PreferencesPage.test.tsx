@@ -23,6 +23,35 @@ describe('TC-PREFS preferences', () => {
     expect(screen.getByTestId('pref-appearance')).toBeInTheDocument()
   })
 
+  it('TC-PREFS.5 exposes AI settings navigation', () => {
+    useDocumentStore.setState({
+      preferences: {
+        ...useDocumentStore.getState().preferences,
+        aiEnabled: false,
+      },
+    })
+    render(<PreferencesPage />)
+    expect(screen.getByTestId('pref-nav-ai')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('pref-nav-ai'))
+    expect(screen.getByTestId('pref-section-ai')).toBeInTheDocument()
+    expect(screen.getByTestId('pref-ai-enabled')).toBeInTheDocument()
+    expect(screen.queryByTestId('pref-ai-api-key')).not.toBeInTheDocument()
+  })
+
+  it('TC-PREFS.6 shows AI options when enabled', () => {
+    useDocumentStore.setState({
+      preferences: {
+        ...useDocumentStore.getState().preferences,
+        aiEnabled: true,
+        aiDisclosureAccepted: true,
+      },
+    })
+    render(<PreferencesPage />)
+    fireEvent.click(screen.getByTestId('pref-nav-ai'))
+    expect(screen.getByTestId('pref-ai-api-key')).toBeInTheDocument()
+    expect(screen.getByTestId('pref-ai-default-model')).toBeInTheDocument()
+  })
+
   it('TC-PREFS.4 calls installCli when the CLI helper is not installed', async () => {
     let cliInstalled = false
     const installCli = vi.fn(async () => {

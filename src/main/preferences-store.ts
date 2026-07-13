@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join, dirname } from 'path'
 import { app } from 'electron'
+import { migrateAiModelPreferences } from '@shared/ai/migrate-model-ids'
 import { DEFAULT_PREFERENCES, type AppPreferences } from '../shared/ipc'
 
 /**
@@ -21,7 +22,13 @@ export class PreferencesStore {
     if (this.cache) return this.cache
     try {
       const raw = await readFile(this.configPath, 'utf-8')
-      this.cache = { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) }
+      const merged = { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) } as AppPreferences
+      const migrated = migrateAiModelPreferences({ preferences: merged })
+      this.cache = migrated
+
+      if (migrated !== merged) {
+        await this.persist()
+      }
     } catch {
       this.cache = { ...DEFAULT_PREFERENCES }
     }
