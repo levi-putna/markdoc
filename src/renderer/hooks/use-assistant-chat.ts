@@ -4,6 +4,11 @@ import type { AssistantEditMode, ChatStreamChunk, ConversationSummary } from '@s
 import { AI_BILLING_URL } from '@shared/ai/types'
 import type { QueuedPromptItem } from '@shared/ai/types'
 import { nanoid } from 'nanoid'
+import {
+  applyUIMessageChunk,
+  type ActiveTextPartIndexes,
+  type UIMessageStreamChunk,
+} from './apply-ui-message-chunk'
 
 export type AssistantChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 
@@ -33,6 +38,7 @@ export function useAssistantChat({
   const [error, setError] = useState<string | null>(null)
   const [queue, setQueue] = useState<QueuedPromptItem[]>([])
   const assistantIdRef = useRef<string | null>(null)
+  const activeTextPartIndexesRef = useRef<ActiveTextPartIndexes>({})
   const messagesRef = useRef(messages)
   const conversationIdRef = useRef(conversationId)
   const statusRef = useRef(status)
@@ -125,10 +131,11 @@ export function useAssistantChat({
       setStatus('streaming')
 
       assistantIdRef.current = nanoid()
+      activeTextPartIndexesRef.current = {}
       const assistantMessage: UIMessage = {
         id: assistantIdRef.current,
         role: 'assistant',
-        parts: [{ type: 'text', text: '' }],
+        parts: [],
       }
       setMessages([...nextMessages, assistantMessage])
 
@@ -215,6 +222,7 @@ export function useAssistantChat({
         })
         setStatus('ready')
         assistantIdRef.current = null
+        activeTextPartIndexesRef.current = {}
 
         setQueue((current) => {
           const pending = current.find((item) => item.status === 'pending')
@@ -231,15 +239,7 @@ export function useAssistantChat({
       }
 
       if (chunk.type === 'ui-message-chunk' && chunk.chunk) {
-        const raw = chunk.chunk as {
-          type?: string
-          delta?: string
-          errorText?: string
-          toolCallId?: string
-          toolName?: string
-          input?: unknown
-          output?: unknown
-        }
+        const raw = chunk.chunk as UIMessageStreamChunk
 
         if (raw.type === 'error') {
           setError(raw.errorText ?? 'Something went wrong with the AI request. Please try again.')
@@ -247,97 +247,26 @@ export function useAssistantChat({
           return
         }
 
-        if (raw.type === 'text-delta' && typeof raw.delta === 'string') {
+        if (
+          raw.type === 'text-start' ||
+          raw.type === 'text-delta' ||
+          raw.type === 'text-end' ||
+          raw.type === 'tool-input-start' ||
+          raw.type === 'tool-input-available' ||
+          raw.type === 'tool-output-available' ||
+          raw.type === 'tool-output-error'
+        ) {
           setMessages((current) =>
             current.map((msg) => {
               if (msg.id !== assistantIdRef.current) return msg
 
-              const textPart = msg.parts.find((part) => part.type === 'text')
-              const existing = textPart && 'text' in textPart ? textPart.text : ''
-              const otherParts = msg.parts.filter((part) => part.type !== 'text')
-
-              return {
-                ...msg,
-                parts: [{ type: 'text' as const, text: existing + raw.delta }, ...otherParts],
-              }
-            })
-          )
-          return
-        }
-
-        if (raw.type === 'tool-input-available' && raw.toolCallId && raw.toolName) {
-          setMessages((current) =>
-            current.map((msg) => {
-              if (msg.id !== assistantIdRef.current) return msg
-
-              const toolPart = {
-                type: `tool-${raw.toolName}`,
-                toolCallId: raw.toolCallId,
-                state: 'input-available',
-                input: raw.input,
-              } as UIMessage['parts'][number]
-
-              const existingIndex = msg.parts.findIndex(
-                (part) => 'toolCallId' in part && part.toolCallId === raw.toolCallId
-              )
-
-              if (existingIndex === -1) {
-                return { ...msg, parts: [...msg.parts, toolPart] }
-              }
-
-              const nextParts = [...msg.parts]
-              nextParts[existingIndex] = toolPart
-              return { ...msg, parts: nextParts }
-            })
-          )
-          return
-        }
-
-        if (raw.type === 'tool-output-available' && raw.toolCallId) {
-          setMessages((current) =>
-            current.map((msg) => {
-              if (msg.id !== assistantIdRef.current) return msg
-
-              const existingIndex = msg.parts.findIndex(
-                (part) => 'toolCallId' in part && part.toolCallId === raw.toolCallId
-              )
-
-              if (existingIndex === -1) return msg
-
-              const existing = msg.parts[existingIndex]
-              const nextParts = [...msg.parts]
-              nextParts[existingIndex] = {
-                ...existing,
-                state: 'output-available',
-                output: raw.output,
-              } as UIMessage['parts'][number]
-
-              return { ...msg, parts: nextParts }
-            })
-          )
-          return
-        }
-
-        if (raw.type === 'tool-output-error' && raw.toolCallId) {
-          setMessages((current) =>
-            current.map((msg) => {
-              if (msg.id !== assistantIdRef.current) return msg
-
-              const existingIndex = msg.parts.findIndex(
-                (part) => 'toolCallId' in part && part.toolCallId === raw.toolCallId
-              )
-
-              if (existingIndex === -1) return msg
-
-              const existing = msg.parts[existingIndex]
-              const nextParts = [...msg.parts]
-              nextParts[existingIndex] = {
-                ...existing,
-                state: 'output-error',
-                errorText: raw.errorText,
-              } as UIMessage['parts'][number]
-
-              return { ...msg, parts: nextParts }
+              const { message, activeTextPartIndexes } = applyUIMessageChunk({
+                message: msg,
+                chunk: raw,
+                activeTextPartIndexes: activeTextPartIndexesRef.current,
+              })
+              activeTextPartIndexesRef.current = activeTextPartIndexes
+              return message
             })
           )
         }

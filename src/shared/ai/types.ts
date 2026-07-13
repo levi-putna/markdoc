@@ -1,5 +1,7 @@
 import type { UIMessage } from 'ai'
 
+export type { AutocompleteEditorContext, AutocompleteBlockContext } from '../ai-autocomplete-context'
+
 export type AssistantEditMode = 'suggestion' | 'auto'
 
 export type AutocompleteContextWindow = 'paragraph' | 'section' | 'document'

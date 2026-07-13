@@ -12,7 +12,11 @@ const editInputSchema = z.object({
     .string()
     .optional()
     .describe('Exact text to replace when positions are unavailable. Must match the document text.'),
-  replacement: z.string().describe('Replacement markdown for the target range.'),
+  replacement: z
+    .string()
+    .describe(
+      'Replacement Markdown for the target range. Must preserve surrounding block structure: match list markers, heading levels, fence delimiters, and blank-line spacing. Use inline syntax only for inline spans; include full block syntax when replacing blocks.'
+    ),
   rationale: z.string().optional().describe('Short reason for the change, shown in the review UI.'),
 })
 
@@ -125,7 +129,8 @@ export function buildAssistantTools({
 
   return {
     read_document: tool({
-      description: 'Read the full document or a section by heading id or line range.',
+      description:
+        'Read the full document or a section by heading id or line range. When planning an edit, read lines above and below the target to inspect surrounding Markdown structure.',
       inputSchema: z.object({
         headingId: z.string().optional(),
         lineStart: z.number().optional(),
@@ -176,7 +181,8 @@ export function buildAssistantTools({
     }),
 
     read_outline: tool({
-      description: 'Read the document heading outline hierarchy with ProseMirror positions.',
+      description:
+        'Read the document heading outline hierarchy with ProseMirror positions. Use before structural edits to respect heading levels and section boundaries.',
       inputSchema: z.object({}),
       execute: async () => {
         const snapshot = await getSnapshot()
@@ -209,7 +215,7 @@ export function buildAssistantTools({
 
     propose_edit: tool({
       description:
-        'Propose an edit as track changes for user review. Provide selection from/to from read_selection, or originalText for text search. Always include a short rationale.',
+        'Propose an edit as track changes for user review. Read surrounding context first so the replacement preserves Markdown structure and does not break headings, lists, code fences, or blockquotes. Provide selection from/to from read_selection, or originalText for text search. Always include a short rationale.',
       inputSchema: editInputSchema,
       execute: async ({ from, to, originalText, replacement, rationale }) => {
         if (editMode === 'auto') {
@@ -220,7 +226,8 @@ export function buildAssistantTools({
     }),
 
     apply_edit: tool({
-      description: 'Apply an edit directly to the document immediately.',
+      description:
+        'Apply an edit directly to the document immediately. Read surrounding context first and ensure the replacement preserves Markdown structure and does not break neighbouring formatting.',
       inputSchema: editInputSchema,
       execute: async ({ from, to, originalText, replacement, rationale }) => {
         return executeEdit({ from, to, originalText, replacement, rationale, mode: 'auto' })

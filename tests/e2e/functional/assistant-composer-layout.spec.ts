@@ -12,11 +12,11 @@ test.describe('Assistant composer layout', () => {
       env: { ...process.env, NODE_ENV: 'test', MARKDOC_TEST: '1' },
     })
 
-    const window = await app.firstWindow({ timeout: 30000 })
-    await window.waitForLoadState('domcontentloaded')
-    await expect(window.locator('[data-testid="document-window"]')).toBeVisible({ timeout: 15000 })
+    const page = await app.firstWindow({ timeout: 30000 })
+    await page.waitForLoadState('domcontentloaded')
+    await expect(page.locator('[data-testid="document-window"]')).toBeVisible({ timeout: 15000 })
 
-    await window.evaluate(async () => {
+    await page.evaluate(async () => {
       await window.markdoc.setPreferences({
         aiEnabled: true,
         aiDisclosureAccepted: true,
@@ -25,12 +25,12 @@ test.describe('Assistant composer layout', () => {
       })
     })
 
-    await window.click('[data-testid="assistant-toggle"]')
-    await expect(window.locator('[data-testid="assistant-composer-actions"]')).toBeVisible({
+    await page.click('[data-testid="assistant-toggle"]')
+    await expect(page.locator('[data-testid="assistant-composer-actions"]')).toBeVisible({
       timeout: 10000,
     })
 
-    const layout = await window.evaluate(() => {
+    const layout = await page.evaluate(() => {
       const actions = document.querySelector('[data-testid="assistant-composer-actions"]')
       const submit = document.querySelector('[data-testid="assistant-composer-submit"]')
       const inputGroup = document.querySelector('.assistant-prompt-input [data-slot="input-group"]')

@@ -1,4 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
+import type { AutocompleteEditorContext } from './ai-autocomplete-context'
 import type {
   ApplyEditPayload,
   AssistantEditMode,
@@ -21,6 +22,7 @@ import {
 
 export const IPC_CHANNELS = {
   FILE_OPEN: 'file:open',
+  FILE_OPEN_REQUEST: 'file:open-request',
   FILE_SAVE: 'file:save',
   FILE_SAVE_AS: 'file:save-as',
   FILE_READ: 'file:read',
@@ -161,9 +163,7 @@ export interface AiModelsListResult {
 
 export interface AutocompleteRequestPayload {
   modelId: string
-  prefix: string
-  suffix: string
-  contextWindow: AutocompleteContextWindow
+  context: AutocompleteEditorContext
 }
 
 export interface AutocompleteResultPayload {
@@ -177,6 +177,33 @@ export interface DocumentPayload {
   markdown: string
   frontMatter: Record<string, unknown>
   isDirty: boolean
+}
+
+/** Lightweight document state mirrored from the renderer for open-routing decisions. */
+export interface WindowDocumentSnapshot {
+  filePath: string | null
+  isDirty: boolean
+  isEmpty: boolean
+}
+
+/** Payload synced to main so native window chrome and open routing stay accurate. */
+export interface WindowDirtyStatePayload {
+  isDirty: boolean
+  filePath: string | null
+  isEmpty: boolean
+}
+
+export type FileOpenSource = 'external' | 'menu' | 'drop'
+
+/** Main → renderer: a file path to load, optionally pre-approved past the dirty guard. */
+export interface FileOpenPathPayload {
+  filePath: string
+  approved?: boolean
+}
+
+export interface FileOpenRequestPayload {
+  filePath: string
+  source?: FileOpenSource
 }
 
 export interface FileReadResult {

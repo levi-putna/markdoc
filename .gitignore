@@ -11,6 +11,8 @@ test-results/
 playwright-report/
 .vite/
 macos/QuickLookExtension/build/
+build/icon-compiled/
+build/Assets.car
 macos/QuickLookExtension/*.xcodeproj/
 macos/QuickLookExtension/DerivedData/
 macos/QuickLookExtension/Resources/markdown-it.min.js

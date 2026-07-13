@@ -175,6 +175,8 @@ Each row is a representative test case; area codes map to `functional-requiremen
 | TC-FILE.7 | Modifying the backing file of an open document from outside MarkDoc (e.g. writing to it directly in the test) triggers the reload/keep-editing prompt; choosing "reload" replaces in-app content, choosing "keep editing" preserves it and the next save overwrites the external change. | Integration |
 | TC-FILE.8 | Making edits, then force-killing the app process, then relaunching and reopening the same document, offers the crash-recovery snapshot; accepting it restores the unsaved edits, declining it opens the last-saved version. | Integration |
 | TC-FILE.9 | Closing a window with unsaved changes prompts to save; choosing "Don't Save" discards changes, "Save" writes them, "Cancel" aborts the close. | Integration |
+| TC-FILE.10 | With a pristine blank window open, opening a file from Finder/CLI reuses that window instead of spawning a second one. | Integration |
+| TC-FILE.11 | With a saved document open, opening another file from Finder/CLI creates a new window and leaves the existing document untouched. | Integration |
 
 **Command Line Interface (`TC-CLI`) — verifies FR-6.x**
 

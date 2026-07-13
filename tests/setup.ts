@@ -9,6 +9,25 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   } as typeof ResizeObserver
 }
 
+// Radix Select uses pointer capture APIs that jsdom does not implement.
+if (typeof HTMLElement !== 'undefined') {
+  const elementPrototype = HTMLElement.prototype as HTMLElement & {
+    hasPointerCapture?: (pointerId: number) => boolean
+    setPointerCapture?: (pointerId: number) => void
+    releasePointerCapture?: (pointerId: number) => void
+  }
+
+  if (!elementPrototype.hasPointerCapture) {
+    elementPrototype.hasPointerCapture = () => false
+  }
+  if (!elementPrototype.setPointerCapture) {
+    elementPrototype.setPointerCapture = () => {}
+  }
+  if (!elementPrototype.releasePointerCapture) {
+    elementPrototype.releasePointerCapture = () => {}
+  }
+}
+
 // Mermaid measures rendered SVG text via getBBox, which jsdom does not implement.
 const svgPrototype = SVGElement.prototype as SVGElement & {
   getBBox?: () => DOMRect
@@ -61,6 +80,8 @@ Object.defineProperty(window, 'markdoc', {
     onThemeChanged: () => () => {},
     onMenuAction: () => () => {},
     onFileOpenRequested: () => () => {},
+    requestOpenFile: async () => {},
+    setWindowDirtyState: async () => {},
     onFileChangedExternal: () => () => {},
     readFile: async () => ({ filePath: '', markdown: '', frontMatter: {} }),
     writeFile: async () => ({ success: true }),

@@ -12,14 +12,16 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "build:quicklook": "bash macos/scripts/build-quicklook.sh",
-    "package": "yarn build && yarn build:quicklook && electron-builder --mac",
+    "build:icon": "bash scripts/compile-macos-icon.sh",
+    "package": "yarn build && yarn build:icon && yarn build:quicklook && electron-builder --mac",
     "dist": "yarn package",
-    "release": "yarn build && yarn build:quicklook && electron-builder --mac --publish always",
+    "release": "yarn build && yarn build:icon && yarn build:quicklook && electron-builder --mac --publish always",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\" \"tests/**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
+    "test:ai-live": "vitest run tests/integration/ai-gateway-live.test.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:smoke": "vitest run && playwright test tests/e2e/smoke"
@@ -135,6 +137,10 @@
       {
         "from": "cli/markdoc",
         "to": "cli/markdoc"
+      },
+      {
+        "from": "build/Assets.car",
+        "to": "Assets.car"
       }
     ],
     "publish": {
@@ -167,6 +173,7 @@
       ],
       "x64ArchFiles": "Contents/PlugIns/MarkDocQuickLook.appex/**",
       "extendInfo": {
+        "CFBundleIconName": "MarkDoc",
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "Markdown Document",

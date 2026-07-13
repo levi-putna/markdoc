@@ -161,6 +161,32 @@ describe('AssistantPanel', () => {
     })
   })
 
+  it('shows contextual suggested prompts in the empty state', () => {
+    useDocumentStore.setState({
+      wordCount: 120,
+      preferences: {
+        ...useDocumentStore.getState().preferences,
+        aiEnabled: true,
+        aiDisclosureAccepted: true,
+      },
+    })
+
+    render(
+      <AssistantPanel
+        sessionId="test-session"
+        hasSelection
+        isDocumentEmpty={false}
+        onHeadingClick={() => {}}
+        onOpenPreferences={() => {}}
+        {...defaultSuggestionProps}
+      />
+    )
+
+    expect(screen.getByTestId('assistant-empty-state')).toBeInTheDocument()
+    expect(screen.getByText('Summarise selection')).toBeInTheDocument()
+    expect(screen.getByText('Rewrite')).toBeInTheDocument()
+  })
+
   it('composer action bar shows a single truncated model label and visible submit control', () => {
     useDocumentStore.setState({
       preferences: {

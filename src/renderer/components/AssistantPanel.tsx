@@ -1,4 +1,31 @@
 import { useMemo, useState, useCallback, useEffect, type ComponentProps } from 'react'
+
+/** Varied status lines while the assistant runs a tool or waits to stream. */
+const ASSISTANT_LOADING_MESSAGES = [
+  'Planning edit…',
+  'Reviewing your document…',
+  'Considering changes…',
+  'Drafting an update…',
+  'Checking context…',
+  'Preparing a suggestion…',
+  'Analysing the section…',
+  'Thinking through the edit…',
+  'Mapping the change…',
+  'Weighing options…',
+  'Composing revision…',
+  'Scanning nearby content…',
+  'Aligning with your draft…',
+  'Shaping the proposal…',
+  'Refining the approach…',
+] as const
+
+/**
+ * Picks one loading line at random for a single in-flight assistant activity.
+ */
+function pickRandomLoadingMessage(): string {
+  const index = Math.floor(Math.random() * ASSISTANT_LOADING_MESSAGES.length)
+  return ASSISTANT_LOADING_MESSAGES[index] ?? ASSISTANT_LOADING_MESSAGES[0]
+}
 import type { UIMessage } from 'ai'
 import { Bot, FileDiff, FileText, MessageSquarePlus, Search, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import {
@@ -74,6 +101,9 @@ const ASSISTANT_COMPOSER_MODEL_CLASS =
 const ASSISTANT_COMPOSER_ICON_SELECT_CLASS =
   `${ASSISTANT_COMPOSER_SELECT_CLASS} !w-control !min-w-control shrink-0 justify-center px-0 [&>svg:last-child]:hidden`
 
+/** Radix Select resets to its mount-time value on `form.reset()`; use a non-existent form id so composer selects keep the user's choice after submit. */
+const DETACHED_SELECT_FORM_ID = 'markdoc-composer-detached-form'
+
 type AssistantPanelTab = 'chat' | 'history'
 
 const ASSISTANT_MESSAGE_CLASS = 'assistant-message gap-1.5'
@@ -122,6 +152,23 @@ function hasRunningToolParts({ message }: { message: UIMessage }): boolean {
  */
 function formatToolLabel({ toolName }: { toolName: string }): string {
   return toolName.replace(/_/g, ' ')
+}
+
+/** Present-tense status line shown while a known tool is running. */
+const TOOL_RUNNING_LABELS: Record<string, string> = {
+  search_document: 'Searching document…',
+  read_document: 'Reading document…',
+  read_selection: 'Reading selection…',
+  read_outline: 'Reading outline…',
+  propose_edit: 'Proposing edit…',
+  apply_edit: 'Applying edit…',
+}
+
+/**
+ * Status line for an in-flight tool call.
+ */
+function getToolRunningLabel({ toolName }: { toolName: string }): string {
+  return TOOL_RUNNING_LABELS[toolName] ?? `Running ${formatToolLabel({ toolName })}…`
 }
 
 /**
@@ -278,7 +325,7 @@ function AssistantToolCallRow({
     state === 'input-streaming' ||
     state === 'approval-requested'
   const label = isRunning
-    ? `Running ${formatToolLabel({ toolName })}…`
+    ? getToolRunningLabel({ toolName })
     : state === 'output-error'
       ? `Failed ${formatToolLabel({ toolName })}`
       : formatToolLabel({ toolName })
@@ -286,20 +333,23 @@ function AssistantToolCallRow({
 
   return (
     <div
-      className={cn(
-        'assistant-tool-activity flex w-full items-center gap-1.5 rounded-xs py-0.5',
-        isRunning && 'assistant-tool-activity--running'
-      )}
+      className="assistant-tool-activity flex w-full flex-col gap-1 rounded-xs py-0.5"
       data-testid="assistant-tool-activity"
     >
-      <Icon className="size-3 shrink-0 text-content-secondary" aria-hidden />
-      {isRunning ? (
-        <Shimmer as="span" className="text-[11px] leading-[14px]" duration={1.5}>
-          {label}
-        </Shimmer>
-      ) : (
-        <span className="text-[11px] leading-[14px] text-red-600">{label}</span>
-      )}
+      <div className="flex w-full items-center gap-1.5">
+        <Icon className="size-3 shrink-0 text-content-secondary" aria-hidden />
+        {isRunning ? (
+          <Shimmer
+            as="span"
+            className="text-[11px] leading-[14px] text-content-secondary"
+            duration={1.5}
+          >
+            {label}
+          </Shimmer>
+        ) : (
+          <span className="text-[11px] leading-[14px] text-red-600">{label}</span>
+        )}
+      </div>
     </div>
   )
 }
@@ -308,6 +358,8 @@ function AssistantToolCallRow({
  * Skeleton placeholder while waiting for the first streamed assistant tokens.
  */
 function AssistantStreamingSkeleton() {
+  const [loadingMessage] = useState(pickRandomLoadingMessage)
+
   return (
     <div
       className="flex w-full max-w-[min(100%,16rem)] flex-col gap-2"
@@ -315,6 +367,9 @@ function AssistantStreamingSkeleton() {
       aria-label="Assistant is responding"
       data-testid="assistant-streaming-skeleton"
     >
+      <Shimmer as="span" className="text-[13px] leading-[18px]" duration={1.5}>
+        {loadingMessage}
+      </Shimmer>
       <Skeleton className="h-3 w-full" />
       <Skeleton className="h-3 w-[92%]" />
       <Skeleton className="h-3 w-[68%]" />
@@ -492,9 +547,7 @@ function AssistantMessageText({
  * Renders one assistant message part (text via Streamdown, or tool activity).
  */
 function AssistantMessagePart({
-  message,
   part,
-  partIndex,
   onHeadingClick,
   isAnimating = false,
   pendingSuggestionIds,
@@ -503,9 +556,7 @@ function AssistantMessagePart({
   onRejectSuggestion,
   onFocusSuggestion,
 }: {
-  message: UIMessage
   part: UIMessage['parts'][number]
-  partIndex: number
   onHeadingClick: (headingId: string) => void
   isAnimating?: boolean
   pendingSuggestionIds: string[]
@@ -958,9 +1009,7 @@ export function AssistantPanel({
                       {message.parts.map((part, i) => (
                         <AssistantMessagePart
                           key={`${message.id}-${i}`}
-                          message={message}
                           part={part}
-                          partIndex={i}
                           onHeadingClick={onHeadingClick}
                           isAnimating={isAnimating && part.type === 'text'}
                           pendingSuggestionIds={pendingSuggestionIds}
@@ -1025,7 +1074,11 @@ export function AssistantPanel({
                 <div className="assistant-composer-actions" data-testid="assistant-composer-actions">
                   {/* Model picker — grows to fill remaining space */}
                   <div className="assistant-composer-actions__model">
-                    <PromptInputSelect value={selectedModel} onValueChange={setSelectedModel}>
+                    <PromptInputSelect
+                      form={DETACHED_SELECT_FORM_ID}
+                      value={selectedModel}
+                      onValueChange={setSelectedModel}
+                    >
                       <PromptInputSelectTrigger
                         className={ASSISTANT_COMPOSER_MODEL_CLASS}
                         title={selectedModelLabel}
@@ -1055,6 +1108,7 @@ export function AssistantPanel({
                   {/* Edit mode + submit — fixed width, never shrinks */}
                   <div className="assistant-composer-actions__controls">
                     <PromptInputSelect
+                      form={DETACHED_SELECT_FORM_ID}
                       value={editMode}
                       onValueChange={(value) => setEditMode(value as AssistantEditMode)}
                     >

@@ -23,6 +23,9 @@ import {
   type WindowState,
   type AssetWritePayload,
   type FileOperationResult,
+  type FileOpenSource,
+  type WindowDocumentSnapshot,
+  type FileOpenRequestPayload,
 } from '../shared/ipc'
 import { parseMarkdownFile, serializeMarkdownFile, getAssetFolderPath, getStyleSidecarPath } from '../shared/file-utils'
 import { exportToDocx, wrapStandaloneHtml } from '../shared/export'
@@ -34,14 +37,21 @@ import { checkForUpdatesManually, registerAutoUpdaterEvents, startBackgroundUpda
 import { getCliInstallPath, installCli, isCliInstalled, uninstallCli } from './cli-installer'
 import { parseLaunchArgv } from '../shared/launch-args'
 import { registerAiIpcHandlers } from './ai/register-ai-handlers'
+import {
+  PRISTINE_DOCUMENT_SNAPSHOT,
+  resolveFileOpenRoute,
+} from './document-open-router'
 
 const preferencesStore = new PreferencesStore()
 
 const windows = new Map<number, BrowserWindow>()
 const windowStates = new Map<number, Partial<WindowState>>()
+const windowDocuments = new Map<number, WindowDocumentSnapshot>()
 const fileWatchers = new Map<string, ReturnType<typeof chokidar.watch>>()
 // Windows waiting on a save round-trip before they can close
 const pendingCloseWindows = new Set<number>()
+// Windows waiting on a save round-trip before an in-place file open can proceed
+const pendingOpenAfterSave = new Map<number, string>()
 let pendingOpenFiles: string[] = []
 
 /**
@@ -62,6 +72,88 @@ function getTargetWindow(): BrowserWindow | null {
   const focused = BrowserWindow.getFocusedWindow()
   if (focused && windows.has(focused.id)) return focused
   return [...windows.values()].at(-1) ?? null
+}
+
+/**
+ * Shows the standard macOS unsaved-changes prompt for a document window.
+ * Returns the button index: 0 = Save, 1 = Don't Save, 2 = Cancel.
+ */
+function promptUnsavedChanges(win: BrowserWindow): 0 | 1 | 2 {
+  const fileName = win.getRepresentedFilename().split('/').pop() || 'Untitled'
+  return dialog.showMessageBoxSync(win, {
+    type: 'warning',
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    message: `Do you want to save the changes made to “${fileName}”?`,
+    detail: "Your changes will be lost if you don't save them.",
+  }) as 0 | 1 | 2
+}
+
+/**
+ * Delivers a file-open request to an existing window, prompting first if the
+ * target document has unsaved changes that would be discarded.
+ */
+function deliverFileOpenToWindow(win: BrowserWindow, filePath: string): void {
+  const snapshot = windowDocuments.get(win.id) ?? PRISTINE_DOCUMENT_SNAPSHOT
+
+  if (snapshot.isDirty) {
+    const choice = promptUnsavedChanges(win)
+
+    if (choice === 0) {
+      pendingOpenAfterSave.set(win.id, filePath)
+      win.webContents.send('menu:save')
+      return
+    }
+
+    if (choice === 2) {
+      return
+    }
+  }
+
+  win.focus()
+  win.webContents.send('file:open-path', { filePath, approved: true })
+}
+
+/**
+ * Routes a file open to a new or existing document window based on document state.
+ */
+function routeFileOpen({
+  filePath,
+  source,
+  forceNewWindow = false,
+  targetWindowId,
+}: {
+  filePath: string
+  source: FileOpenSource
+  forceNewWindow?: boolean
+  targetWindowId?: number
+}): void {
+  const windowIds = [...windows.keys()]
+  const focused = BrowserWindow.getFocusedWindow()
+  const focusedWindowId = focused && windows.has(focused.id) ? focused.id : null
+
+  const route = resolveFileOpenRoute({
+    source,
+    forceNewWindow,
+    targetWindowId,
+    focusedWindowId,
+    windowIds,
+    snapshots: windowDocuments,
+  })
+
+  if (route.type === 'new-window') {
+    createDocumentWindow({ filePath })
+    return
+  }
+
+  const target = windows.get(route.windowId)
+  if (!target || target.isDestroyed()) {
+    createDocumentWindow({ filePath })
+    return
+  }
+
+  deliverFileOpenToWindow(target, filePath)
 }
 
 /**
@@ -172,12 +264,9 @@ function createApplicationMenu(): void {
           click: async () => {
             const target = getTargetWindow()
             if (!target) return
-            // handleOpenDialog only resolves the picked paths — it doesn't load
-            // them anywhere on its own, so forward each to the renderer via the
-            // same channel used by CLI/Finder/second-instance file opens.
             const paths = await handleOpenDialog(target)
             for (const path of paths) {
-              target.webContents.send('file:open-path', path)
+              routeFileOpen({ filePath: path, source: 'menu' })
             }
           },
         },
@@ -398,12 +487,13 @@ function createDocumentWindow({
   })
 
   windows.set(win.id, win)
+  windowDocuments.set(win.id, { ...PRISTINE_DOCUMENT_SNAPSHOT })
 
   win.on('ready-to-show', () => {
     win.show()
     const openPath = filePath ?? restoredState?.filePath ?? undefined
     if (openPath) {
-      win.webContents.send('file:open-path', openPath)
+      win.webContents.send('file:open-path', { filePath: openPath, approved: true })
     }
     if (restoredState) {
       win.webContents.send('window:restore-state', restoredState)
@@ -415,15 +505,7 @@ function createDocumentWindow({
     if (!win.isDocumentEdited() || pendingCloseWindows.has(win.id)) return
 
     event.preventDefault()
-    const fileName = win.getRepresentedFilename().split('/').pop() || 'Untitled'
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'warning',
-      buttons: ['Save', "Don't Save", 'Cancel'],
-      defaultId: 0,
-      cancelId: 2,
-      message: `Do you want to save the changes made to “${fileName}”?`,
-      detail: "Your changes will be lost if you don't save them.",
-    })
+    const choice = promptUnsavedChanges(win)
 
     if (choice === 0) {
       // Close completes once the renderer reports a clean document
@@ -436,8 +518,10 @@ function createDocumentWindow({
 
   win.on('closed', () => {
     pendingCloseWindows.delete(win.id)
+    pendingOpenAfterSave.delete(win.id)
     windows.delete(win.id)
     windowStates.delete(win.id)
+    windowDocuments.delete(win.id)
     void persistSessionState()
   })
 
@@ -606,9 +690,18 @@ function registerIpcHandlers(): void {
   // close button, proxy icon via represented filename, and window title.
   ipcMain.handle(
     IPC_CHANNELS.WINDOW_SET_DIRTY,
-    (event, { isDirty, filePath }: { isDirty: boolean; filePath: string | null }) => {
+    (
+      event,
+      { isDirty, filePath, isEmpty }: { isDirty: boolean; filePath: string | null; isEmpty?: boolean }
+    ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return
+
+      windowDocuments.set(win.id, {
+        filePath,
+        isDirty,
+        isEmpty: isEmpty ?? true,
+      })
 
       win.setDocumentEdited(isDirty)
       win.setRepresentedFilename(filePath ?? '')
@@ -617,9 +710,27 @@ function registerIpcHandlers(): void {
       if (!isDirty && pendingCloseWindows.has(win.id)) {
         pendingCloseWindows.delete(win.id)
         win.destroy()
+        return
+      }
+
+      if (!isDirty && pendingOpenAfterSave.has(win.id)) {
+        const pendingPath = pendingOpenAfterSave.get(win.id)!
+        pendingOpenAfterSave.delete(win.id)
+        win.webContents.send('file:open-path', { filePath: pendingPath, approved: true })
       }
     }
   )
+
+  ipcMain.handle(IPC_CHANNELS.FILE_OPEN_REQUEST, async (event, payload: FileOpenRequestPayload) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || !windows.has(win.id)) return
+
+    routeFileOpen({
+      filePath: payload.filePath,
+      source: payload.source ?? 'drop',
+      targetWindowId: win.id,
+    })
+  })
 
   ipcMain.handle(IPC_CHANNELS.DIALOG_OPEN, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -1145,23 +1256,8 @@ function openLaunchFiles({
     return
   }
 
-  if (newWindow) {
-    for (const file of files) {
-      createDocumentWindow({ filePath: file })
-    }
-    return
-  }
-
-  const existing = [...windows.values()]
-  if (existing.length > 0) {
-    for (const file of files) {
-      createDocumentWindow({ filePath: file })
-    }
-    existing[0].focus()
-  } else {
-    for (const file of files) {
-      createDocumentWindow({ filePath: file })
-    }
+  for (const file of files) {
+    routeFileOpen({ filePath: file, source: 'external', forceNewWindow: newWindow })
   }
 }
 
@@ -1212,7 +1308,7 @@ function bootstrap(): void {
   app.on('open-file', (event, filePath) => {
     event.preventDefault()
     if (app.isReady()) {
-      createDocumentWindow({ filePath })
+      routeFileOpen({ filePath, source: 'external' })
     } else {
       pendingOpenFiles.push(filePath)
     }

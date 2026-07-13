@@ -12,11 +12,27 @@ import type { AiErrorPayload, AssistantEditMode } from '@shared/ai/types'
 import { buildAssistantTools, requestDocumentSnapshot } from './tools'
 import { normaliseGatewayError } from './gateway-errors'
 import { ASSISTANT_MAX_STEPS, buildGatewayStreamOptions } from './gateway-model'
+import {
+  buildAutocompletePrompt,
+  normaliseAutocompleteSuggestion,
+  type AutocompleteEditorContext,
+} from '@shared/ai-autocomplete-context'
 import { nanoid } from 'nanoid'
 
 const SYSTEM_PROMPT = `You are MarkDoc's document writing assistant. You help users understand and edit their Markdown document.
 
 Use tools to read the document before making claims or edits. When referencing headings in your replies, use heading://<headingId> links (e.g. heading://h2-intro-0).
+
+Markdown structure and formatting:
+- Before editing, read enough context to see surrounding structure — use read_document (with a heading or line range), read_outline, and read_selection as needed. Inspect lines above and below the target range, not just the exact span being replaced.
+- Match the document's existing Markdown conventions: heading levels, list style (- vs * vs numbered), emphasis style, indentation, and blank-line spacing between blocks.
+- Preserve block structure. Do not flatten headings, lists, blockquotes, or fenced code blocks into plain text unless the user explicitly asks for that.
+- Scope replacements correctly: use inline Markdown for inline edits; include full block syntax (heading markers, list markers, fence delimiters) when replacing whole blocks.
+- Respect heading hierarchy — do not introduce a heading level that skips or disrupts the outline. Use read_outline before moving or rewriting sections.
+- Keep list numbering and bullet continuity intact. When editing one list item, do not break the list or leave dangling markers.
+- Preserve fenced code block language tags and closing fences. Never leave an unclosed fence or half a code block.
+- Maintain blank lines between blocks as in the surrounding document. A missing or extra blank line can change rendering.
+- If a requested change would break surrounding formatting, adjust the replacement, narrow or widen the edit range, or explain the trade-off in your reply instead of applying a damaging edit.
 
 For edits:
 - Call read_selection before editing selected text and use its from/to positions in propose_edit.
@@ -188,24 +204,32 @@ export async function runAssistantAgent({
 export async function runAutocomplete({
   apiKey,
   modelId,
-  prefix,
-  suffix,
+  context,
   abortSignal,
 }: {
   apiKey: string
   modelId: string
-  prefix: string
-  suffix: string
+  context: AutocompleteEditorContext
   abortSignal: AbortSignal
 }): Promise<string> {
+  const { system, prompt } = buildAutocompletePrompt({ context })
   const gatewayOptions = buildGatewayStreamOptions({ apiKey, modelId })
   const { text } = await generateText({
     ...gatewayOptions,
-    system: 'Continue the text naturally. Return only the continuation, no quotes or explanation.',
-    prompt: `${prefix}<CURSOR>${suffix}`,
+    system,
+    prompt,
     abortSignal,
-    maxOutputTokens: 60,
+    maxOutputTokens: 80,
   })
 
-  return text.trim()
+  return (
+    normaliseAutocompleteSuggestion({
+      suggestion: text,
+      prefix: context.prefix,
+      suffix: context.suffix,
+      charBeforeCursor: context.charBeforeCursor,
+      charAfterCursor: context.charAfterCursor,
+      cursorInWord: context.cursorInWord,
+    }) ?? ''
+  )
 }

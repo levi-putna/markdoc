@@ -1,0 +1,16 @@
+{
+  "conversationId": "fixture-conversation-1",
+  "title": "Summarise the intro",
+  "messages": [
+    {
+      "id": "msg-user-1",
+      "role": "user",
+      "parts": [{ "type": "text", "text": "Summarise the introduction section" }]
+    },
+    {
+      "id": "msg-assistant-1",
+      "role": "assistant",
+      "parts": [{ "type": "text", "text": "The introduction covers the project goals." }]
+    }
+  ]
+}

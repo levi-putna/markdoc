@@ -23,6 +23,8 @@ import {
   type AiModelsListResult,
   type AutocompleteRequestPayload,
   type AutocompleteResultPayload,
+  type FileOpenPathPayload,
+  type FileOpenSource,
 } from '../shared/ipc'
 import type { UIMessage } from 'ai'
 import type { ConversationSummary, SuggestionDecorationPayload } from '../shared/ai/types'
@@ -34,14 +36,25 @@ import type { ConversationSummary, SuggestionDecorationPayload } from '../shared
  * can race ahead of React's effects — this preload module loads and attaches
  * its listener well before that, so nothing gets dropped.
  */
-const pendingOpenPaths: string[] = []
-let openPathListener: ((filePath: string) => void) | null = null
+const pendingOpenPaths: FileOpenPathPayload[] = []
+let openPathListener: ((payload: FileOpenPathPayload) => void) | null = null
 
-ipcRenderer.on('file:open-path', (_event, filePath: string) => {
+/**
+ * Normalises legacy string payloads from older main-process sends.
+ */
+function normalizeFileOpenPayload(payload: string | FileOpenPathPayload): FileOpenPathPayload {
+  if (typeof payload === 'string') {
+    return { filePath: payload }
+  }
+  return payload
+}
+
+ipcRenderer.on('file:open-path', (_event, payload: string | FileOpenPathPayload) => {
+  const normalised = normalizeFileOpenPayload(payload)
   if (openPathListener) {
-    openPathListener(filePath)
+    openPathListener(normalised)
   } else {
-    pendingOpenPaths.push(filePath)
+    pendingOpenPaths.push(normalised)
   }
 })
 
@@ -103,10 +116,10 @@ const markdocApi = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_THEME_CHANGED, handler)
   },
 
-  onFileOpenRequested: (callback: (filePath: string) => void): (() => void) => {
+  onFileOpenRequested: (callback: (payload: FileOpenPathPayload) => void): (() => void) => {
     openPathListener = callback
     while (pendingOpenPaths.length > 0) {
-      callback(pendingOpenPaths.shift() as string)
+      callback(pendingOpenPaths.shift() as FileOpenPathPayload)
     }
     return () => {
       if (openPathListener === callback) openPathListener = null
@@ -136,10 +149,21 @@ const markdocApi = {
   setWindowDirtyState: ({
     isDirty,
     filePath,
+    isEmpty,
   }: {
     isDirty: boolean
     filePath: string | null
-  }): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_DIRTY, { isDirty, filePath }),
+    isEmpty: boolean
+  }): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_DIRTY, { isDirty, filePath, isEmpty }),
+
+  requestOpenFile: ({
+    filePath,
+    source,
+  }: {
+    filePath: string
+    source?: FileOpenSource
+  }): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.FILE_OPEN_REQUEST, { filePath, source }),
 
   saveRecovery: (filePath: string, content: string): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.RECOVERY_SAVE, { filePath, content }),

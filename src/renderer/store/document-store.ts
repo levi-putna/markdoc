@@ -75,6 +75,13 @@ interface DocumentActions {
     suggestionId: string
     status: 'accepted' | 'rejected'
   }) => void
+  recordSuggestionResolutions: ({
+    suggestionIds,
+    status,
+  }: {
+    suggestionIds: string[]
+    status: 'accepted' | 'rejected'
+  }) => void
   clearSuggestionResolutions: () => void
   setAiModels: (models: GatewayModelInfo[]) => void
   reset: () => void
@@ -169,6 +176,13 @@ export const useDocumentStore = create<DocumentState & DocumentActions>((set) =>
   setSuggestionResolution: ({ suggestionId, status }) =>
     set((state) => ({
       suggestionResolutions: { ...state.suggestionResolutions, [suggestionId]: status },
+    })),
+  recordSuggestionResolutions: ({ suggestionIds, status }) =>
+    set((state) => ({
+      suggestionResolutions: {
+        ...state.suggestionResolutions,
+        ...Object.fromEntries(suggestionIds.map((suggestionId) => [suggestionId, status])),
+      },
     })),
   clearSuggestionResolutions: () => set({ suggestionResolutions: {} }),
   setAiModels: (models) => set({ aiModels: models }),

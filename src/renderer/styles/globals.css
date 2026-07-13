@@ -147,38 +147,6 @@ body {
   line-height: 1.4;
 }
 
-/* Tool activity row — shimmer sweeps icon + label while running */
-.assistant-tool-activity--running {
-  position: relative;
-  overflow: hidden;
-}
-
-.assistant-tool-activity--running::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--accent) 10%, transparent) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: assistant-tool-shimmer-sweep 1.5s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes assistant-tool-shimmer-sweep {
-  from {
-    background-position: 200% center;
-  }
-
-  to {
-    background-position: -200% center;
-  }
-}
-
 .assistant-prompt-input {
   width: 100%;
   min-width: 0;

@@ -664,6 +664,31 @@ export function PreferencesPage() {
                   onValueChange={({ modelId }) => void update({ defaultAutocompleteModel: modelId })}
                 />
               </PreferenceRow>
+
+              <PreferenceRow
+                label="Autocomplete context"
+                description="How much surrounding document text is sent for inline suggestions."
+                htmlFor="pref-autocomplete-context"
+              >
+                <select
+                  id="pref-autocomplete-context"
+                  className={controlClassName}
+                  value={local.autocompleteContextWindow}
+                  onChange={(event) =>
+                    void update({
+                      autocompleteContextWindow: event.target.value as
+                        | 'paragraph'
+                        | 'section'
+                        | 'document',
+                    })
+                  }
+                  data-testid="pref-autocomplete-context"
+                >
+                  <option value="paragraph">Current paragraph</option>
+                  <option value="section">Current section</option>
+                  <option value="document">Whole document</option>
+                </select>
+              </PreferenceRow>
                 </>
               )}
 

@@ -87,7 +87,7 @@ function DocumentWindow() {
     setPendingSuggestionCount,
     setPendingSuggestionIds,
     setSuggestionResolution,
-    clearSuggestionResolutions,
+    recordSuggestionResolutions,
     documentSessionId,
     setAiModels,
   } = useDocumentStore()
@@ -303,13 +303,17 @@ function DocumentWindow() {
       syncSuggestions()
     })
     const unsubAcceptAll = window.markdoc.onSuggestionAcceptAll(() => {
+      const ids = useDocumentStore.getState().pendingSuggestionIds
       editorRef.current?.commands.acceptAllAiSuggestions()
+      useDocumentStore.getState().recordSuggestionResolutions({ suggestionIds: ids, status: 'accepted' })
       setDirty(true)
       setPendingSuggestionCount(0)
       setPendingSuggestionIds([])
     })
     const unsubRejectAll = window.markdoc.onSuggestionRejectAll(() => {
+      const ids = useDocumentStore.getState().pendingSuggestionIds
       editorRef.current?.commands.rejectAllAiSuggestions()
+      useDocumentStore.getState().recordSuggestionResolutions({ suggestionIds: ids, status: 'rejected' })
       setPendingSuggestionCount(0)
       setPendingSuggestionIds([])
     })
@@ -370,12 +374,16 @@ function DocumentWindow() {
   }, [preferences])
 
   // Mirror document state onto native window chrome (dirty dot in the close
-  // button, represented file proxy icon, window title)
+  // button, represented file proxy icon, window title) and main-process routing.
   useEffect(() => {
-    window.markdoc?.setWindowDirtyState({ isDirty, filePath })
+    window.markdoc?.setWindowDirtyState({
+      isDirty,
+      filePath,
+      isEmpty: markdown.trim() === '',
+    })
     const fileName = filePath?.split('/').pop()
     document.title = fileName ?? 'Untitled'
-  }, [isDirty, filePath])
+  }, [isDirty, filePath, markdown])
 
   // Crash recovery snapshots
   useEffect(() => {
@@ -391,8 +399,13 @@ function DocumentWindow() {
   }, [filePath, isDirty, markdown])
 
   const loadFile = useCallback(
-    async (path: string) => {
+    async (path: string, { approved = false }: { approved?: boolean } = {}) => {
       if (!window.markdoc) return
+
+      if (isDirty && !approved) {
+        console.warn('Blocked unapproved file open while document has unsaved changes:', path)
+        return
+      }
 
       try {
         const recovery = await window.markdoc.checkRecovery(path)
@@ -424,7 +437,7 @@ function DocumentWindow() {
         window.alert(`Couldn't open “${path.split('/').pop()}”.\n\n${(error as Error).message ?? error}`)
       }
     },
-    [setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown, loadStyleForDocument, checkImages]
+    [isDirty, setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown, loadStyleForDocument, checkImages]
   )
 
   const handleSave = useCallback(async () => {
@@ -516,19 +529,19 @@ function DocumentWindow() {
       }),
       window.markdoc.onMenuAction('export', () => setExportOpen(true)),
       window.markdoc.onMenuAction('document-styles', () => setStylePanelOpen(true)),
-      window.markdoc.onFileOpenRequested((path) => loadFile(path)),
+      window.markdoc.onFileOpenRequested(({ filePath: path, approved }) => loadFile(path, { approved })),
       window.markdoc.onFileChangedExternal((path) => {
         if (path === filePath) {
           const shouldReload = window.confirm(
             'This file was changed outside MarkDoc.\n\nReload it from disk? Your unsaved changes will be lost.'
           )
-          if (shouldReload) loadFile(path)
+          if (shouldReload) loadFile(path, { approved: true })
         }
       }),
     ]
 
     return () => unsubs.forEach((u) => u?.())
-  }, [filePath, frontMatter, markdown, handleSave, handleSaveAs, loadFile, setFindReplaceOpen, setSearchOpen, setStylePanelOpen, syncIndexFromMarkdown, syncPreviewFromMarkdown, setMarkdown, setFrontMatter, setDirty, setFilePath])
+  }, [filePath, frontMatter, markdown, isDirty, handleSave, handleSaveAs, loadFile, setFindReplaceOpen, setSearchOpen, setStylePanelOpen, syncIndexFromMarkdown, syncPreviewFromMarkdown, setMarkdown, setFrontMatter, setDirty, setFilePath])
 
   const handleEditorReady = useCallback(({ editor }: { editor: Editor }) => {
     editorRef.current = editor
@@ -613,10 +626,10 @@ function DocumentWindow() {
     (event: React.DragEvent) => {
       event.preventDefault()
       const dropped = event.dataTransfer.files[0]
-      if (!dropped?.path) return
-      loadFile(dropped.path)
+      if (!dropped?.path || !window.markdoc) return
+      void window.markdoc.requestOpenFile({ filePath: dropped.path, source: 'drop' })
     },
-    [loadFile]
+    []
   )
 
   const insertImageIntoEditor = useCallback(
@@ -703,23 +716,37 @@ function DocumentWindow() {
   )
 
   const handleAcceptAllSuggestions = useCallback(() => {
+    const ids = useDocumentStore.getState().pendingSuggestionIds
     editorRef.current?.commands.acceptAllAiSuggestions()
+    recordSuggestionResolutions({ suggestionIds: ids, status: 'accepted' })
     setDirty(true)
     setPendingSuggestionCount(0)
     setPendingSuggestionIds([])
-    clearSuggestionResolutions()
-  }, [setDirty, setPendingSuggestionCount, setPendingSuggestionIds, clearSuggestionResolutions])
+  }, [recordSuggestionResolutions, setDirty, setPendingSuggestionCount, setPendingSuggestionIds])
 
   const handleRejectAllSuggestions = useCallback(() => {
+    const ids = useDocumentStore.getState().pendingSuggestionIds
     editorRef.current?.commands.rejectAllAiSuggestions()
+    recordSuggestionResolutions({ suggestionIds: ids, status: 'rejected' })
     setPendingSuggestionCount(0)
     setPendingSuggestionIds([])
-    clearSuggestionResolutions()
-  }, [setPendingSuggestionCount, setPendingSuggestionIds, clearSuggestionResolutions])
+  }, [recordSuggestionResolutions, setPendingSuggestionCount, setPendingSuggestionIds])
 
   const handleFocusSuggestion = useCallback(({ suggestionId }: { suggestionId: string }) => {
     setViewMode('edit')
-    editorRef.current?.commands.focusAiSuggestion(suggestionId)
+    const editor = editorRef.current
+    if (!editor) return
+
+    const suggestion = aiSuggestionsKey
+      .getState(editor.state)
+      ?.suggestions.find((entry) => entry.suggestionId === suggestionId)
+
+    editor.commands.focusAiSuggestion(suggestionId)
+
+    if (suggestion) {
+      scrollNonce.current += 1
+      setScrollToPos({ pos: suggestion.from, nonce: scrollNonce.current })
+    }
   }, [setViewMode])
 
   const flatOutline = flattenOutline(outline)

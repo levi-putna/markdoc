@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { APICallError } from 'ai'
 import {
   aiDisabledError,
   missingKeyError,
@@ -69,5 +70,91 @@ describe('gateway-errors', () => {
 
     expect(error.code).toBe('model_unavailable')
     expect(error.message).toContain('retired')
+  })
+
+  it('maps APICallError status codes to user-facing payloads', () => {
+    expect(
+      normaliseGatewayError({
+        error: new APICallError({
+          message: 'Unauthorized',
+          url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 401,
+          responseHeaders: {},
+          responseBody: '',
+          isRetryable: false,
+        }),
+      }).code
+    ).toBe('invalid_key')
+
+    expect(
+      normaliseGatewayError({
+        error: new APICallError({
+          message: 'Payment required',
+          url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 402,
+          responseHeaders: {},
+          responseBody: '',
+          isRetryable: false,
+        }),
+      }).code
+    ).toBe('insufficient_credit')
+
+    expect(
+      normaliseGatewayError({
+        error: new APICallError({
+          message: 'Forbidden',
+          url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 403,
+          responseHeaders: {},
+          responseBody: '',
+          isRetryable: false,
+        }),
+      }).code
+    ).toBe('insufficient_credit')
+
+    expect(
+      normaliseGatewayError({
+        error: new APICallError({
+          message: 'Too many requests',
+          url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 429,
+          responseHeaders: {},
+          responseBody: '',
+          isRetryable: true,
+        }),
+      })
+    ).toMatchObject({ code: 'rate_limit', retryAfterMs: 5000 })
+
+    expect(
+      normaliseGatewayError({
+        error: new APICallError({
+          message: 'Model not found',
+          url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 404,
+          responseHeaders: {},
+          responseBody: '',
+          isRetryable: false,
+        }),
+      }).code
+    ).toBe('model_unavailable')
+
+    expect(
+      normaliseGatewayError({
+        error: new APICallError({
+          message: 'Service unavailable',
+          url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 503,
+          responseHeaders: {},
+          responseBody: '',
+          isRetryable: true,
+        }),
+      }).code
+    ).toBe('network')
   })
 })

@@ -2,7 +2,12 @@ import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 
-const autocompleteKey = new PluginKey('aiAutocomplete')
+interface AutocompletePluginState {
+  decorations: DecorationSet
+  ghostText: string
+}
+
+export const autocompleteKey = new PluginKey<AutocompletePluginState>('aiAutocomplete')
 
 /**
  * Ghost-text inline autocomplete for AI continue-writing (FR-14.41).
@@ -12,33 +17,53 @@ export const AiAutocomplete = Extension.create({
 
   addProseMirrorPlugins() {
     return [
-      new Plugin({
+      new Plugin<AutocompletePluginState>({
         key: autocompleteKey,
         state: {
           init() {
-            return DecorationSet.empty
-          },
-          apply(tr, old) {
-            const meta = tr.getMeta(autocompleteKey)
-            if (meta?.ghostText !== undefined) {
-              if (!meta.ghostText) return DecorationSet.empty
-              const pos = tr.selection.from
-              return DecorationSet.create(tr.doc, [
-                Decoration.widget(pos, () => {
-                  const span = document.createElement('span')
-                  span.className = 'ai-autocomplete-ghost'
-                  span.textContent = meta.ghostText as string
-                  return span
-                }),
-              ])
+            return {
+              decorations: DecorationSet.empty,
+              ghostText: '',
             }
-            if (tr.docChanged || tr.selectionSet) return DecorationSet.empty
-            return old
+          },
+          apply(tr, value) {
+            const meta = tr.getMeta(autocompleteKey) as { ghostText?: string } | undefined
+
+            if (meta?.ghostText !== undefined) {
+              if (!meta.ghostText) {
+                return {
+                  decorations: DecorationSet.empty,
+                  ghostText: '',
+                }
+              }
+
+              const pos = tr.selection.from
+              return {
+                ghostText: meta.ghostText,
+                decorations: DecorationSet.create(tr.doc, [
+                  Decoration.widget(pos, () => {
+                    const span = document.createElement('span')
+                    span.className = 'ai-autocomplete-ghost'
+                    span.textContent = meta.ghostText as string
+                    return span
+                  }),
+                ]),
+              }
+            }
+
+            if (tr.docChanged || tr.selectionSet) {
+              return {
+                decorations: DecorationSet.empty,
+                ghostText: '',
+              }
+            }
+
+            return value
           },
         },
         props: {
           decorations(state) {
-            return autocompleteKey.getState(state) ?? DecorationSet.empty
+            return autocompleteKey.getState(state)?.decorations ?? DecorationSet.empty
           },
         },
       }),
@@ -65,6 +90,19 @@ export const AiAutocomplete = Extension.create({
           }
           return true
         },
+      acceptAutocompleteGhost:
+        () =>
+        ({ state, dispatch }) => {
+          const pluginState = autocompleteKey.getState(state)
+          const ghostText = pluginState?.ghostText
+          if (!ghostText) return false
+
+          const tr = state.tr.insertText(ghostText, state.selection.from, state.selection.to)
+          tr.setMeta(autocompleteKey, { ghostText: '' })
+
+          if (dispatch) dispatch(tr)
+          return true
+        },
     }
   },
 })
@@ -74,6 +112,7 @@ declare module '@tiptap/core' {
     aiAutocomplete: {
       setAutocompleteGhost: (ghostText: string) => ReturnType
       clearAutocompleteGhost: () => ReturnType
+      acceptAutocompleteGhost: () => ReturnType
     }
   }
 }

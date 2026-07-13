@@ -1,5 +1,5 @@
 import { ipcMain, type WebContents } from 'electron'
-import { IPC_CHANNELS, type AppPreferences, type ChatSendPayload } from '@shared/ipc'
+import { IPC_CHANNELS, type ChatSendPayload } from '@shared/ipc'
 import { DEFAULT_AUTOCOMPLETE_MODEL } from '@shared/ai/default-models'
 import type { PreferencesStore } from '../preferences-store'
 import { getApiKey, setApiKey, clearApiKey, hasApiKey } from './keychain'
@@ -266,15 +266,11 @@ export function registerAiIpcHandlers({
       {
         requestId,
         modelId,
-        prefix,
-        suffix,
-        contextWindow,
+        context,
       }: {
         requestId: string
         modelId: string
-        prefix: string
-        suffix: string
-        contextWindow: AppPreferences['autocompleteContextWindow']
+        context: import('@shared/ai-autocomplete-context').AutocompleteEditorContext
       }
     ) => {
       const webContents = event.sender
@@ -292,8 +288,7 @@ export function registerAiIpcHandlers({
         const text = await runAutocomplete({
           apiKey: ready.apiKey,
           modelId,
-          prefix,
-          suffix: contextWindow === 'paragraph' ? '' : suffix,
+          context,
           abortSignal: abortController.signal,
         })
         webContents.send(IPC_CHANNELS.AI_AUTOCOMPLETE_RESULT, { requestId, text })

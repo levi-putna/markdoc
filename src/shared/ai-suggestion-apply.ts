@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/core'
-import { DOMParser, Fragment } from '@tiptap/pm/model'
+import { DOMParser, Slice } from '@tiptap/pm/model'
 import { findTextRangeInDocument, resolveEditRange } from './ai-edit-positions'
 
 /**
@@ -24,13 +24,13 @@ export function buildReplacementSlice({
 }: {
   editor: Editor
   replacement: string
-}) {
+}): Slice {
   const markdownStorage = editor.storage.markdown as {
     parser?: { parse: (content: string, options?: { inline?: boolean }) => string }
   } | undefined
 
   if (!replacement.trim()) {
-    return Fragment.empty
+    return Slice.empty
   }
 
   let html = replacement

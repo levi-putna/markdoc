@@ -68,7 +68,6 @@ describe('ai-edit-positions', () => {
     const resolved = resolveEditRange({
       doc,
       originalText: 'beta',
-      replacement: 'delta',
     })
 
     expect(resolved?.originalText).toBe('beta')

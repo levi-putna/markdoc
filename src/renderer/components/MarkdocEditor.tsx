@@ -3,7 +3,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { createTiptapExtensions } from '@shared/tiptap-extensions'
 import { SyntaxReveal } from '@shared/syntax-reveal'
 import { AiSuggestions } from '@shared/ai-suggestions'
-import { AiAutocomplete } from '@shared/ai-autocomplete'
+import { AiAutocomplete, autocompleteKey } from '@shared/ai-autocomplete'
 import { MarkdocImage } from './ImageNodeView'
 import { nanoid } from 'nanoid'
 import { getDebounceMs } from '@shared/types'
@@ -12,6 +12,10 @@ import {
   findActiveHeadingId,
   syncDocumentIndexFromEditor,
 } from '@shared/outline-sync'
+import {
+  buildAutocompleteEditorContext,
+  normaliseAutocompleteSuggestion,
+} from '@shared/ai-autocomplete-context'
 import { useDocumentStore } from '../store/document-store'
 import { CodeBlockView } from './CodeBlockView'
 import { EditorToolbar } from './EditorToolbar'
@@ -49,6 +53,7 @@ export function MarkdocEditor({
     setActiveHeadingId,
     documentTier,
     preferences,
+    outline,
   } = useDocumentStore()
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -208,20 +213,19 @@ export function MarkdocEditor({
 
     if (autocompleteRef.current) clearTimeout(autocompleteRef.current)
     autocompleteRef.current = setTimeout(() => {
-      const { from } = ed.state.selection
-      const docText = ed.state.doc.textBetween(0, ed.state.doc.content.size, '\n')
-      const prefix = docText.slice(0, from)
-      const suffix = docText.slice(from)
-      if (prefix.trim().length < 8) return
+      const context = buildAutocompleteEditorContext({
+        editor: ed,
+        contextWindow: preferences.autocompleteContextWindow,
+        outline,
+      })
+      if (!context || context.cursorInWord) return
 
       const requestId = nanoid()
       autocompleteRequestId.current = requestId
       void window.markdoc?.requestAutocomplete({
         requestId,
         modelId: preferences.defaultAutocompleteModel,
-        prefix,
-        suffix,
-        contextWindow: preferences.autocompleteContextWindow,
+        context,
       })
     }, 600)
   }
@@ -235,22 +239,46 @@ export function MarkdocEditor({
         editor.commands.clearAutocompleteGhost()
         return
       }
-      editor.commands.setAutocompleteGhost(text)
+
+      const context = buildAutocompleteEditorContext({
+        editor,
+        contextWindow: preferences.autocompleteContextWindow,
+        outline,
+      })
+      if (!context) {
+        editor.commands.clearAutocompleteGhost()
+        return
+      }
+
+      const normalised = normaliseAutocompleteSuggestion({
+        suggestion: text,
+        prefix: context.prefix,
+        suffix: context.suffix,
+        charBeforeCursor: context.charBeforeCursor,
+        charAfterCursor: context.charAfterCursor,
+        cursorInWord: context.cursorInWord,
+      })
+
+      if (!normalised) {
+        editor.commands.clearAutocompleteGhost()
+        return
+      }
+
+      editor.commands.setAutocompleteGhost(normalised)
     })
 
     return unsub
-  }, [editor])
+  }, [editor, outline, preferences.autocompleteContextWindow])
 
   useEffect(() => {
     if (!editor) return
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Tab') {
-        const ghost = document.querySelector('.ai-autocomplete-ghost')?.textContent
-        if (ghost) {
+        const pluginState = autocompleteKey.getState(editor.state)
+        if (pluginState?.ghostText) {
           event.preventDefault()
-          editor.commands.insertContent(ghost)
-          editor.commands.clearAutocompleteGhost()
+          editor.commands.acceptAutocompleteGhost()
           if (autocompleteRequestId.current) {
             void window.markdoc?.cancelAutocomplete({ requestId: autocompleteRequestId.current })
           }
