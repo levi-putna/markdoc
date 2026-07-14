@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/react'
 import {
+  AtSign,
   Bold,
   Italic,
   Strikethrough,
@@ -129,6 +130,19 @@ export function EditorToolbar({ editor, onInsertImage }: EditorToolbarProps) {
         data-testid="insert-image-button"
       >
         <ImageIcon />
+      </button>
+      <button
+        type="button"
+        className="toolbar-icon-btn"
+        onClick={() => {
+          // Inserting `@` at the caret opens the same heading-mention suggestion popup.
+          editor.chain().focus().insertContent('@').run()
+        }}
+        aria-label="Mention heading"
+        title="Mention heading"
+        data-testid="insert-heading-mention-button"
+      >
+        <AtSign />
       </button>
 
       {/* Undo / redo — far right */}

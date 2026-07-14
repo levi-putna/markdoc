@@ -2,8 +2,15 @@ import { useEditor, EditorContent, ReactNodeViewRenderer, type Editor } from '@t
 import { useEffect, useRef, useCallback } from 'react'
 import { createTiptapExtensions } from '@shared/tiptap-extensions'
 import { SyntaxReveal } from '@shared/syntax-reveal'
+import { HexColorHighlight } from '@shared/hex-color-highlight'
+import { MarkdownPaste } from '@shared/markdown-paste'
 import { AiSuggestions } from '@shared/ai-suggestions'
 import { AiAutocomplete, autocompleteKey } from '@shared/ai-autocomplete'
+import {
+  preprocessGfmExtensions,
+  extractHeadingIdsFromMarkdown,
+  applyHeadingIdsToEditor,
+} from '@shared/markdown-gfm'
 import { MarkdocImage } from './ImageNodeView'
 import { nanoid } from 'nanoid'
 import { getDebounceMs } from '@shared/types'
@@ -20,6 +27,8 @@ import { useDocumentStore } from '../store/document-store'
 import { CodeBlockView } from './CodeBlockView'
 import { EditorToolbar } from './EditorToolbar'
 import { TableBubbleMenu } from './TableBubbleMenu'
+import { HeadingMentionView } from './HeadingMentionView'
+import { createHeadingMentionSuggestionRender } from '../utils/heading-mention-suggestion'
 
 interface MarkdocEditorProps {
   content: string
@@ -28,6 +37,7 @@ interface MarkdocEditorProps {
   onInsertImage?: () => void
   onAskAssistant?: ({ text }: { text: string }) => void
   onSelectionChange?: ({ hasSelection }: { hasSelection: boolean }) => void
+  onHeadingClick?: (headingId: string) => void
   scrollToPos?: { pos: number; nonce: number } | null
 }
 
@@ -41,6 +51,7 @@ export function MarkdocEditor({
   onInsertImage,
   onAskAssistant,
   onSelectionChange,
+  onHeadingClick,
   scrollToPos,
 }: MarkdocEditorProps) {
   const {
@@ -62,17 +73,49 @@ export function MarkdocEditor({
   const scheduleAutocompleteRef = useRef<(ed: Editor) => void>(() => {})
   const isLocalUpdate = useRef(false)
   const rafRef = useRef<number | null>(null)
+  const onHeadingClickRef = useRef(onHeadingClick)
+  onHeadingClickRef.current = onHeadingClick
 
   const editor = useEditor({
     extensions: [...createTiptapExtensions({
       codeBlockNodeView: () => ReactNodeViewRenderer(CodeBlockView),
       imageExtension: MarkdocImage,
-    }), SyntaxReveal, AiSuggestions, AiAutocomplete],
-    content,
+      headingMentionNodeView: () => ReactNodeViewRenderer(HeadingMentionView),
+      headingMentionSuggestion: {
+        render: createHeadingMentionSuggestionRender,
+      },
+    }), MarkdownPaste, SyntaxReveal, HexColorHighlight, AiSuggestions, AiAutocomplete],
+    content: (() => {
+      // Heading ids are applied in onCreate after the initial parse.
+      return preprocessGfmExtensions(content)
+    })(),
+    onCreate: ({ editor: ed }) => {
+      applyHeadingIdsToEditor({
+        editor: ed,
+        headingIds: extractHeadingIdsFromMarkdown({ markdown: content }),
+      })
+    },
     editorProps: {
       attributes: {
         class: 'tiptap simple-editor-content focus:outline-none',
         spellcheck: preferences.spellcheckEnabled ? 'true' : 'false',
+      },
+      handleClick: (_view, _pos, event) => {
+        const target = event.target as HTMLElement | null
+        const mention = target?.closest?.('[data-heading-mention], a[href^="heading://"]') as
+          | HTMLElement
+          | null
+        if (!mention) return false
+
+        event.preventDefault()
+        const headingId =
+          mention.getAttribute('data-heading-id') ??
+          mention.getAttribute('href')?.replace(/^heading:\/\//, '') ??
+          null
+        if (headingId && !mention.getAttribute('data-broken')) {
+          onHeadingClickRef.current?.(headingId)
+        }
+        return true
       },
     },
     onUpdate: ({ editor: ed }) => {
@@ -116,6 +159,18 @@ export function MarkdocEditor({
     setDocumentTier(tier)
     setActiveHeadingId(findActiveHeadingId({ editor }))
     onContentChange?.({ markdown: getMarkdownFromEditor(editor), html: editor.getHTML() })
+
+    // Heading-mention NodeViews dispatch this event instead of using
+    // href="heading://…", which Electron would try to open externally.
+    const onMentionNavigate = (event: Event) => {
+      const custom = event as CustomEvent<{ headingId?: string }>
+      const headingId = custom.detail?.headingId
+      if (headingId) onHeadingClickRef.current?.(headingId)
+    }
+    editor.view.dom.addEventListener('markdoc-heading-mention', onMentionNavigate)
+    return () => {
+      editor.view.dom.removeEventListener('markdoc-heading-mention', onMentionNavigate)
+    }
   }, [editor])
 
   // Apply external markdown changes (file load, markdown tab, outline reorder)
@@ -127,7 +182,9 @@ export function MarkdocEditor({
 
     const current = getMarkdownFromEditor(editor)
     if (current !== content) {
-      editor.commands.setContent(content, false)
+      const headingIds = extractHeadingIdsFromMarkdown({ markdown: content })
+      editor.commands.setContent(preprocessGfmExtensions(content), false)
+      applyHeadingIdsToEditor({ editor, headingIds })
       const { outline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
         syncDocumentIndexFromEditor({ editor })
       setOutline(outline)

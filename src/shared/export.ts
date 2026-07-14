@@ -4,11 +4,13 @@ import { imageSize } from 'image-size'
 import type { JSONContent } from '@tiptap/core'
 import {
   AlignmentType,
+  Bookmark,
   BorderStyle,
   Document,
   ExternalHyperlink,
   HeadingLevel,
   ImageRun,
+  InternalHyperlink,
   LevelFormat,
   Packer,
   Paragraph,
@@ -22,6 +24,8 @@ import {
   convertInchesToTwip,
   type ParagraphChild,
 } from 'docx'
+import { bookmarkIdForHeading } from './heading-mention-export'
+import { HEADING_DELETED_LABEL } from './heading-mention-resolve'
 
 /** Reference name for the single ordered-list numbering definition every export document shares. */
 const ORDERED_LIST_NUMBERING = 'markdoc-ordered-list'
@@ -49,6 +53,8 @@ type DocxBlock = Paragraph | Table
 interface ConvertContext {
   documentDir: string | null
   warnings: string[]
+  /** headingId → current heading text for resolving mention labels. */
+  headingLookup: Map<string, string>
 }
 
 /** Per-block formatting inherited by nested content (e.g. blockquote indent/border). */
@@ -75,7 +81,11 @@ export async function exportToDocx({
   title: string
   documentDir?: string | null
 }): Promise<{ buffer: Buffer; warnings: string[] }> {
-  const context: ConvertContext = { documentDir, warnings: [] }
+  const context: ConvertContext = {
+    documentDir,
+    warnings: [],
+    headingLookup: buildHeadingTextLookup({ doc }),
+  }
   const children = convertBlocks({ nodes: doc.content ?? [], context })
 
   const document = new Document({
@@ -126,9 +136,9 @@ function convertBlock({
 }): DocxBlock[] {
   switch (node.type) {
     case 'paragraph':
-      return [buildParagraph({ node, options })]
+      return [buildParagraph({ node, options, context })]
     case 'heading':
-      return [buildHeading({ node })]
+      return [buildHeading({ node, context })]
     case 'bulletList':
       return convertList({ node, context, ordered: false, level: options.listLevel ?? 0 })
     case 'orderedList':
@@ -159,7 +169,7 @@ function convertBlock({
       // of silently dropping it (FR-11.6).
       if (node.content) {
         context.warnings.push(`Unsupported block type "${node.type}" was exported as plain text.`)
-        return [buildParagraph({ node, options })]
+        return [buildParagraph({ node, options, context })]
       }
       return []
   }
@@ -169,11 +179,16 @@ function convertBlock({
 function buildParagraph({
   node,
   options = {},
+  context,
 }: {
   node: JSONContent
   options?: BlockOptions
+  context: ConvertContext
 }): Paragraph {
-  const runs = convertInline({ nodes: node.content ?? [] })
+  const runs = convertInline({
+    nodes: node.content ?? [],
+    headingLookup: context.headingLookup,
+  })
   return new Paragraph({
     children: runs.length > 0 ? runs : [],
     indent: options.quote ? { left: convertInchesToTwip(0.4) } : undefined,
@@ -181,20 +196,83 @@ function buildParagraph({
   })
 }
 
-function buildHeading({ node }: { node: JSONContent }): Paragraph {
+function buildHeading({
+  node,
+  context,
+}: {
+  node: JSONContent
+  context: ConvertContext
+}): Paragraph {
   const level: number = node.attrs?.level ?? 1
-  const runs = convertInline({ nodes: node.content ?? [] })
+  const runs = convertInline({
+    nodes: node.content ?? [],
+    headingLookup: context.headingLookup,
+  })
+  const headingId = typeof node.attrs?.headingId === 'string' ? node.attrs.headingId : null
+  const children: ParagraphChild[] =
+    headingId != null
+      ? [
+          new Bookmark({
+            id: bookmarkIdForHeading({ headingId }),
+            children: runs.length > 0 ? runs : [new TextRun({ text: '' })],
+          }),
+        ]
+      : runs
+
   return new Paragraph({
     heading: HEADING_LEVELS[level - 1] ?? HeadingLevel.HEADING_1,
-    children: runs,
+    children: children.length > 0 ? children : [],
   })
 }
 
 /**
- * Converts inline content (text runs with marks, hard breaks, links) into
- * docx paragraph children.
+ * Collects headingId → text from a full document JSON tree for mention labels.
  */
-function convertInline({ nodes }: { nodes: JSONContent[] }): ParagraphChild[] {
+function buildHeadingTextLookup({ doc }: { doc: JSONContent }): Map<string, string> {
+  const lookup = new Map<string, string>()
+
+  const walk = (nodes: JSONContent[] | undefined) => {
+    if (!nodes) return
+    for (const child of nodes) {
+      if (child.type === 'heading') {
+        const headingId = child.attrs?.headingId
+        if (typeof headingId === 'string') {
+          const text = collectPlainText({ nodes: child.content ?? [] }) || 'Untitled'
+          lookup.set(headingId, text)
+        }
+      }
+      if (child.content) walk(child.content)
+    }
+  }
+
+  walk(doc.content)
+  return lookup
+}
+
+/**
+ * Collects plain text from inline JSON content.
+ */
+function collectPlainText({ nodes }: { nodes: JSONContent[] }): string {
+  return nodes
+    .map((node) => {
+      if (node.type === 'text') return node.text ?? ''
+      if (node.content) return collectPlainText({ nodes: node.content })
+      return ''
+    })
+    .join('')
+}
+
+/**
+ * Converts inline content (text runs with marks, hard breaks, links, heading
+ * mentions) into docx paragraph children.
+ */
+function convertInline({
+  nodes,
+  headingLookup,
+}: {
+  nodes: JSONContent[]
+  headingLookup: Map<string, string>
+}): ParagraphChild[] {
   const runs: ParagraphChild[] = []
 
   for (const node of nodes) {
@@ -202,6 +280,37 @@ function convertInline({ nodes }: { nodes: JSONContent[] }): ParagraphChild[] {
       runs.push(buildLineBreak())
       continue
     }
+
+    if (node.type === 'headingMention') {
+      const headingId = typeof node.attrs?.headingId === 'string' ? node.attrs.headingId : null
+      if (!headingId) continue
+      const label = headingLookup.get(headingId)
+      const text = label ? `@${label}` : `@${HEADING_DELETED_LABEL}`
+
+      if (label) {
+        runs.push(
+          new InternalHyperlink({
+            anchor: bookmarkIdForHeading({ headingId }),
+            children: [
+              new TextRun({
+                text,
+                color: '2563EB',
+                underline: {},
+              }),
+            ],
+          })
+        )
+      } else {
+        runs.push(
+          new TextRun({
+            text,
+            color: 'DC2626',
+          })
+        )
+      }
+      continue
+    }
+
     if (node.type !== 'text' || !node.text) continue
 
     const marks = node.marks ?? []
@@ -284,7 +393,10 @@ function convertList({
       }
 
       if (index === 0 && (child.type === 'paragraph' || child.type === 'heading')) {
-        const runs = convertInline({ nodes: child.content ?? [] })
+        const runs = convertInline({
+          nodes: child.content ?? [],
+          headingLookup: context.headingLookup,
+        })
         out.push(
           new Paragraph({
             children: runs,
@@ -332,7 +444,10 @@ function convertTaskList({
         return
       }
 
-      const runs = convertInline({ nodes: child.content ?? [] })
+      const runs = convertInline({
+        nodes: child.content ?? [],
+        headingLookup: context.headingLookup,
+      })
       const prefix = index === 0 ? `${checked ? '☑' : '☐'}  ` : ''
       out.push(
         new Paragraph({

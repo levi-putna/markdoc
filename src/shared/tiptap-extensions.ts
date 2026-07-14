@@ -11,6 +11,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { Markdown } from 'tiptap-markdown'
 import type { Extensions, NodeViewRenderer } from '@tiptap/core'
+import type { SuggestionOptions } from '@tiptap/suggestion'
 import { lowlight } from './code-languages'
 import { FootnoteReference, FootnoteDefinition } from './extensions/footnote'
 import {
@@ -19,6 +20,11 @@ import {
   DefinitionTerm,
   DefinitionDescription,
 } from './extensions/definition-list'
+import { HeadingWithId } from './extensions/heading-id'
+import {
+  createHeadingMentionExtension,
+  type HeadingMentionItem,
+} from './extensions/heading-mention'
 
 interface CreateTiptapExtensionsOptions {
   /**
@@ -30,6 +36,13 @@ interface CreateTiptapExtensionsOptions {
   codeBlockNodeView?: () => NodeViewRenderer
   /** Override the default Image extension (live editor passes MarkdocImage). */
   imageExtension?: Extensions[number]
+  /**
+   * Attaches the React NodeView for heading mentions (live label + broken state).
+   * Headless parsers omit this.
+   */
+  headingMentionNodeView?: () => NodeViewRenderer
+  /** Live-editor suggestion popup hooks for `@` heading mentions. */
+  headingMentionSuggestion?: Partial<SuggestionOptions<HeadingMentionItem>>
 }
 
 /**
@@ -40,6 +53,8 @@ interface CreateTiptapExtensionsOptions {
 export function createTiptapExtensions({
   codeBlockNodeView,
   imageExtension,
+  headingMentionNodeView,
+  headingMentionSuggestion,
 }: CreateTiptapExtensionsOptions = {}): Extensions {
   let codeBlock = CodeBlockLowlight.configure({
     lowlight,
@@ -50,11 +65,24 @@ export function createTiptapExtensions({
     codeBlock = codeBlock.extend({ addNodeView: codeBlockNodeView })
   }
 
+  let headingMention = createHeadingMentionExtension({
+    suggestion: headingMentionSuggestion,
+  })
+
+  if (headingMentionNodeView) {
+    headingMention = headingMention.extend({ addNodeView: headingMentionNodeView })
+  }
+
   return [
-    StarterKit.configure({ codeBlock: false }),
+    StarterKit.configure({ codeBlock: false, heading: false }),
+    HeadingWithId,
     codeBlock,
     Underline,
-    Link.configure({ openOnClick: false }),
+    Link.configure({
+      openOnClick: false,
+      // Leave heading:// links for the headingMention node parser.
+      HTMLAttributes: {},
+    }),
     imageExtension ?? Image,
     Table.configure({ resizable: true }),
     TableRow,
@@ -68,6 +96,7 @@ export function createTiptapExtensions({
     DefinitionItem,
     DefinitionTerm,
     DefinitionDescription,
+    headingMention,
     Markdown.configure({
       html: true,
       transformPastedText: true,

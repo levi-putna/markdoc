@@ -5,6 +5,7 @@ import type { ExportFormat, ExportResult } from '@shared/ipc'
 import { collectPreviewCss, isDarkThemeActive } from '../utils/export-styles'
 import { renderMermaidBlocksInHtml } from '../utils/mermaid'
 import { prepareDocJsonForExport } from '../utils/mermaid-export'
+import { prepareHtmlForExport } from '@shared/heading-mention-export'
 
 interface ExportDialogProps {
   editor: Editor | null
@@ -92,7 +93,7 @@ export function ExportDialog({ editor, filePath, onClose }: ExportDialogProps) {
       } else {
         const rendered = await renderMermaidBlocksInHtml({ html: editor.getHTML(), isDark })
         exportWarnings.push(...rendered.warnings)
-        const bodyHtml = rendered.html
+        const bodyHtml = prepareHtmlForExport({ html: rendered.html })
         const css = collectPreviewCss()
 
         result =

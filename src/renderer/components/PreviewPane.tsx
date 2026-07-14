@@ -10,15 +10,33 @@ interface PreviewPaneProps {
   scrollRatio?: number | null
   onScroll?: (scrollTop: number) => void
   onScrollRatio?: (ratio: number) => void
+  onHeadingClick?: (headingId: string) => void
 }
 
 /**
  * Read-only preview pane rendering sanitised HTML content.
  */
-export function PreviewPane({ html, scrollTop, scrollRatio, onScroll, onScrollRatio }: PreviewPaneProps) {
+export function PreviewPane({
+  html,
+  scrollTop,
+  scrollRatio,
+  onScroll,
+  onScrollRatio,
+  onHeadingClick,
+}: PreviewPaneProps) {
   const filePath = useDocumentStore((state) => state.filePath)
   const [resolvedHtml, setResolvedHtml] = useState(html)
-  const sanitised = useMemo(() => DOMPurify.sanitize(resolvedHtml, { ADD_TAGS: ['style'] }), [resolvedHtml])
+  const sanitised = useMemo(
+    () =>
+      DOMPurify.sanitize(resolvedHtml, {
+        ADD_TAGS: ['style'],
+        ADD_ATTR: ['data-heading-id', 'data-heading-mention', 'data-broken'],
+        // Allow Markdoc heading:// anchors used by @heading mentions.
+        ALLOWED_URI_REGEXP:
+          /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|heading|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+      }),
+    [resolvedHtml]
+  )
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -48,6 +66,29 @@ export function PreviewPane({ html, scrollTop, scrollRatio, onScroll, onScrollRa
         onScroll?.(el.scrollTop)
         const maxScroll = el.scrollHeight - el.clientHeight
         onScrollRatio?.(maxScroll > 0 ? el.scrollTop / maxScroll : 0)
+      }}
+      onClick={(event) => {
+        const target = event.target as HTMLElement | null
+        const mention = target?.closest?.('[data-heading-mention], a[href^="heading://"]') as
+          | HTMLElement
+          | null
+        if (!mention) return
+        event.preventDefault()
+        const headingId =
+          mention.getAttribute('data-heading-id') ??
+          mention.getAttribute('href')?.replace(/^heading:\/\//, '') ??
+          null
+        if (!headingId || mention.getAttribute('data-broken') === 'true') return
+
+        // Scroll the preview pane to the matching heading when it is present.
+        const headingEl = contentRef.current?.querySelector(
+          `[data-heading-id="${CSS.escape(headingId)}"]`
+        )
+        if (headingEl instanceof HTMLElement) {
+          headingEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        }
+
+        onHeadingClick?.(headingId)
       }}
       ref={(el) => {
         if (!el) return

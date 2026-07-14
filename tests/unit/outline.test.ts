@@ -67,14 +67,18 @@ Text b.
     expect(flat[1].level).toBe(3)
   })
 
-  it('TC-OUTLINE.10 uses stable heading ids when positions shift', () => {
-    const before = loadMarkdownIntoEditor('# Hello\n\n## World')
-    const after = loadMarkdownIntoEditor('Preamble\n\n# Hello\n\n## World')
-    const idBefore = buildOutlineFromDoc(before.state.doc)[0].id
-    const idAfter = buildOutlineFromDoc(after.state.doc)[0].id
-    before.destroy()
-    after.destroy()
-    expect(idBefore).toBe(idAfter)
-    expect(idBefore).toBe('h1-hello-0')
+  it('TC-OUTLINE.10 keeps heading ids stable when content is inserted above', () => {
+    const editor = loadMarkdownIntoEditor('# Hello\n\n## World')
+    const idBefore = buildOutlineFromDoc(editor.state.doc)[0].id
+
+    // Insert a preamble paragraph above the heading inside the live document
+    // so the heading node's stored headingId is preserved across the shift.
+    editor.commands.setTextSelection(0)
+    editor.commands.insertContent('Preamble\n\n')
+
+    const idAfter = buildOutlineFromDoc(editor.state.doc)[0].id
+    editor.destroy()
+    expect(idAfter).toBe(idBefore)
+    expect(idBefore).toBeTruthy()
   })
 })

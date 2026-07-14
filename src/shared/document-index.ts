@@ -39,8 +39,11 @@ export function buildOutlineFromDoc(doc: ProseMirrorNode): OutlineNode[] {
       const occurrence = occurrenceCounts.get(key) ?? 0
       occurrenceCounts.set(key, occurrence + 1)
 
+      // Prefer the persistent headingId stored on the node; fall back to the
+      // legacy slug-based id so older assistant heading:// links still resolve.
+      const storedId = node.attrs.headingId as string | null | undefined
       headings.push({
-        id: buildHeadingId({ level, text, occurrence }),
+        id: storedId || buildHeadingId({ level, text, occurrence }),
         text,
         level,
         pos,

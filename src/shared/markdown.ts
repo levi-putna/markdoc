@@ -1,6 +1,11 @@
 import { Editor } from '@tiptap/core'
 import { createTiptapExtensions } from './tiptap-extensions'
-import { preprocessGfmExtensions, postprocessGfmExtensions } from './markdown-gfm'
+import {
+  preprocessGfmExtensions,
+  postprocessGfmExtensions,
+  extractHeadingIdsFromMarkdown,
+  applyHeadingIdsToEditor,
+} from './markdown-gfm'
 
 /**
  * Creates a headless Tiptap editor instance for Markdown round-trip conversion.
@@ -13,11 +18,20 @@ export function createMarkdownEditor(): Editor {
 }
 
 /**
+ * Loads markdown into an editor, restoring any Pandoc-style heading ids.
+ */
+function setMarkdownContent({ editor, markdown }: { editor: Editor; markdown: string }): void {
+  const headingIds = extractHeadingIdsFromMarkdown({ markdown })
+  editor.commands.setContent(preprocessGfmExtensions(markdown))
+  applyHeadingIdsToEditor({ editor, headingIds })
+}
+
+/**
  * Converts Markdown text to a Tiptap document and back, returning serialised Markdown.
  */
 export function markdownRoundTrip(markdown: string): string {
   const editor = createMarkdownEditor()
-  editor.commands.setContent(preprocessGfmExtensions(markdown))
+  setMarkdownContent({ editor, markdown })
   const result = postprocessGfmExtensions(editor.storage.markdown.getMarkdown())
   editor.destroy()
   return result
@@ -28,7 +42,7 @@ export function markdownRoundTrip(markdown: string): string {
  */
 export function loadMarkdownIntoEditor(markdown: string): Editor {
   const editor = createMarkdownEditor()
-  editor.commands.setContent(preprocessGfmExtensions(markdown))
+  setMarkdownContent({ editor, markdown })
   return editor
 }
 

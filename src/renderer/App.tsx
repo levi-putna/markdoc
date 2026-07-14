@@ -783,6 +783,7 @@ function DocumentWindow() {
               scrollToPos={scrollToPos}
               onInsertImage={handleOpenImageDialog}
               onAskAssistant={handleAskAssistant}
+              onHeadingClick={handleJumpToHeadingId}
               onSelectionChange={({ hasSelection: selected }) => setHasSelection(selected)}
             />
           </div>
@@ -809,6 +810,7 @@ function DocumentWindow() {
                 html={previewHtml || '<p></p>'}
                 scrollRatio={viewMode === 'split' ? splitScrollRatio : null}
                 onScrollRatio={viewMode === 'split' ? setSplitScrollRatio : undefined}
+                onHeadingClick={handleJumpToHeadingId}
               />
             </div>
           )}

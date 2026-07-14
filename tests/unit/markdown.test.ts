@@ -50,8 +50,8 @@ describe('markdown round-trip (TC-MD)', () => {
   it('round-trips headings', () => {
     const input = '# Heading 1\n\n## Heading 2\n\nParagraph text.'
     const output = markdownRoundTrip(input)
-    expect(output).toContain('# Heading 1')
-    expect(output).toContain('## Heading 2')
+    expect(output).toMatch(/# Heading 1 \{#[A-Za-z0-9_-]+\}/)
+    expect(output).toMatch(/## Heading 2 \{#[A-Za-z0-9_-]+\}/)
     expect(output).toContain('Paragraph text.')
   })
 
@@ -106,6 +106,7 @@ describe('TC-EDIT.1 input rules', () => {
     const editor = loadMarkdownIntoEditor('# Heading\n\nBody text.')
     const md = getMarkdownFromEditor(editor)
     editor.destroy()
-    expect(md).toMatch(/^# Heading/m)
+    expect(md).toMatch(/^# Heading \{#[A-Za-z0-9_-]+\}/m)
+    expect(md).toContain('Body text.')
   })
 })

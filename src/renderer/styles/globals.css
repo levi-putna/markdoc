@@ -137,6 +137,15 @@ body {
   padding-left: 1.125rem;
 }
 
+/* Restore markers — Tailwind preflight sets list-style: none on all ul/ol. */
+.assistant-panel .assistant-message-body ul {
+  list-style-type: disc;
+}
+
+.assistant-panel .assistant-message-body ol {
+  list-style-type: decimal;
+}
+
 .assistant-panel .assistant-message-body li + li {
   margin-top: 0.125rem;
 }
@@ -308,6 +317,21 @@ textarea {
 .tiptap .syntax-reveal {
   color: var(--content-secondary);
   opacity: 0.65;
+}
+
+/* Hex colour swatches — inspired by Tiptap Savvy colour highlighter */
+.tiptap .hex-color-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.15em;
+  margin-bottom: 0.1em;
+  border: 1px solid color-mix(in srgb, var(--content-text) 20%, transparent);
+  border-radius: 3px;
+  vertical-align: middle;
+  pointer-events: none;
+  user-select: none;
+  background-color: var(--hex-color);
 }
 
 .tiptap h1 {
@@ -689,6 +713,24 @@ textarea {
 .tiptap ol {
   padding-left: 24px;
   margin: 0 0 16px;
+}
+
+/* Restore markers — Tailwind preflight sets list-style: none on all ul/ol,
+   which hid bullet/number glyphs in the editor despite list padding. */
+.tiptap ul:not([data-type='taskList']) {
+  list-style-type: disc;
+}
+
+.tiptap ul:not([data-type='taskList']) ul {
+  list-style-type: circle;
+}
+
+.tiptap ul:not([data-type='taskList']) ul ul {
+  list-style-type: square;
+}
+
+.tiptap ol {
+  list-style-type: decimal;
 }
 
 .tiptap table {
@@ -1234,10 +1276,129 @@ textarea {
 .preview-content p { margin: 0 0 16px; }
 .preview-content pre { background: var(--code-bg); padding: 16px; border-radius: var(--radius-sm); overflow-x: auto; }
 .preview-content blockquote { border-left: 3px solid color-mix(in srgb, var(--accent) 40%, transparent); padding-left: 16px; color: var(--content-text-secondary); }
+.preview-content ul,
+.preview-content ol {
+  padding-left: 24px;
+  margin: 0 0 16px;
+}
+.preview-content ul {
+  list-style-type: disc;
+}
+.preview-content ul ul {
+  list-style-type: circle;
+}
+.preview-content ul ul ul {
+  list-style-type: square;
+}
+.preview-content ol {
+  list-style-type: decimal;
+}
+.preview-content ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
 .preview-content table { border-collapse: collapse; width: 100%; margin: 16px 0; }
 .preview-content th, .preview-content td { border: 1px solid var(--border-subtle); padding: 4px 8px; font-size: 0.875em; line-height: 1.4; }
 .preview-content th p, .preview-content td p { margin: 0; }
 .preview-content img { max-width: 100%; border-radius: var(--radius-sm); }
+
+/* Heading @mentions — inline anchors to document headings */
+.heading-mention,
+.tiptap .heading-mention,
+.preview-content .heading-mention {
+  display: inline;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.heading-mention:hover,
+.tiptap .heading-mention:hover,
+.preview-content .heading-mention:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.heading-mention--broken,
+.tiptap .heading-mention--broken,
+.preview-content .heading-mention--broken {
+  color: #dc2626;
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+  cursor: default;
+}
+
+.heading-mention-popup {
+  position: absolute;
+  z-index: 60;
+}
+
+.heading-mention-list {
+  min-width: 220px;
+  max-width: 360px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--surface-primary);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--content-text) 12%, transparent);
+  padding: 4px;
+}
+
+.heading-mention-list__empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--content-secondary);
+}
+
+.heading-mention-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--content-text);
+}
+
+/* Hover preview — quiet neutral wash; distinct from keyboard selection so
+   scanning with the mouse does not look like the active Enter target (Jakob). */
+.heading-mention-list__item:hover:not(.heading-mention-list__item--selected) {
+  background: color-mix(in srgb, var(--content-text) 6%, transparent);
+}
+
+/* Keyboard / committed selection — accent tint; this is what Enter inserts. */
+.heading-mention-list__item--selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.heading-mention-list__item--selected:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.heading-mention-list__level {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--content-secondary);
+  background: color-mix(in srgb, var(--content-text) 6%, transparent);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.heading-mention-list__text {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Performance: content-visibility for block elements */
 .tiptap > * {
