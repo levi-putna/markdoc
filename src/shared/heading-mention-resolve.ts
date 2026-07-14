@@ -25,6 +25,52 @@ export function shouldOpenMentionPopupUpwards({
   return caretTop >= viewportHeight / 2
 }
 
+/** Viewport margin used to keep mention popups off screen edges. */
+export const MENTION_POPUP_VIEWPORT_MARGIN = 8
+
+/** Gap between the caret/chip and the mention popup. */
+export const MENTION_POPUP_ANCHOR_GAP = 4
+
+/**
+ * Resolves horizontal placement for a mention popup (viewport coordinates).
+ *
+ * Follows common combobox / typeahead patterns (VS Code, Slack, Floating UI):
+ * 1. Prefer opening to the right of the caret with left edges aligned.
+ * 2. If that would overflow the right edge, flip so the menu grows leftward
+ *    from the caret — natural when typing `@` near the right margin.
+ * 3. If the menu is wider than the viewport, clamp it inside the margins.
+ */
+export function resolveMentionPopupHorizontalPlacement({
+  anchorLeft,
+  popupWidth,
+  viewportWidth,
+  margin = MENTION_POPUP_VIEWPORT_MARGIN,
+}: {
+  anchorLeft: number
+  popupWidth: number
+  viewportWidth: number
+  margin?: number
+}): {
+  left: number
+  flipLeft: boolean
+} {
+  const spaceRight = viewportWidth - anchorLeft - margin
+  const spaceLeft = anchorLeft - margin
+
+  if (popupWidth <= spaceRight) {
+    return { left: anchorLeft, flipLeft: false }
+  }
+
+  if (popupWidth <= spaceLeft) {
+    return { left: anchorLeft, flipLeft: true }
+  }
+
+  return {
+    left: Math.max(margin, viewportWidth - margin - popupWidth),
+    flipLeft: false,
+  }
+}
+
 /**
  * Builds a map of headingId → heading metadata from a ProseMirror document.
  */
@@ -66,6 +112,42 @@ export function resolveHeadingById({
 }
 
 /**
+ * Reads the computed numbering label stored on a heading node.
+ */
+export function getHeadingNumberLabel({
+  doc,
+  headingId,
+}: {
+  doc: ProseMirrorNode
+  headingId: string | null | undefined
+}): string | null {
+  const resolved = resolveHeadingById({ doc, headingId })
+  if (!resolved) return null
+  const headingNode = doc.nodeAt(resolved.pos)
+  if (!headingNode || headingNode.type.name !== 'heading') return null
+  const label = headingNode.attrs.headingNumberLabel as string | null | undefined
+  return label?.trim() || null
+}
+
+/**
+ * Builds the visible @mention text, optionally prefixing the bare title with
+ * the heading's computed number label.
+ */
+export function formatHeadingMentionDisplay({
+  title,
+  numberLabel,
+  showNumber = false,
+}: {
+  title: string
+  numberLabel?: string | null
+  showNumber?: boolean
+}): string {
+  const bare = title.trim()
+  if (!showNumber || !numberLabel?.trim() || !bare) return bare
+  return `${numberLabel.trim()} ${bare}`
+}
+
+/**
  * Returns the display label for a heading mention (with leading @ omitted).
  * When the target heading is gone, keeps the last-known `cachedLabel` so the
  * chip still shows what was deleted (styled red by the UI).
@@ -85,6 +167,37 @@ export function getHeadingMentionLabel({
     return { label: fallback, broken: true }
   }
   return { label: resolved.text, broken: false }
+}
+
+/**
+ * Resolves the full visible mention label, optionally including numbering.
+ */
+export function getHeadingMentionDisplayLabel({
+  doc,
+  headingId,
+  cachedLabel = null,
+  showNumbersInMentions = false,
+}: {
+  doc: ProseMirrorNode
+  headingId: string | null | undefined
+  cachedLabel?: string | null
+  showNumbersInMentions?: boolean
+}): { label: string; display: string; broken: boolean } {
+  const { label, broken } = getHeadingMentionLabel({ doc, headingId, cachedLabel })
+  if (broken) {
+    return { label, display: label, broken }
+  }
+
+  const numberLabel = showNumbersInMentions
+    ? getHeadingNumberLabel({ doc, headingId })
+    : null
+  const display = formatHeadingMentionDisplay({
+    title: label,
+    numberLabel,
+    showNumber: showNumbersInMentions,
+  })
+
+  return { label, display, broken }
 }
 
 /**

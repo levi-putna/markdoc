@@ -1,4 +1,4 @@
-import { PanelLeft, Bot, Search } from 'lucide-react'
+import { PanelLeft, Bot, Search, Settings2 } from 'lucide-react'
 import type { ViewMode } from '@shared/ipc'
 import { useDocumentStore } from '../store/document-store'
 
@@ -22,8 +22,8 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
     setViewMode,
     sidebarVisible,
     toggleSidebar,
-    assistantVisible,
-    toggleAssistant,
+    rightPanel,
+    toggleRightPanel,
     isDirty,
     wordCount,
     charCount,
@@ -36,6 +36,8 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
 
   const title = filePath ? filePath.split('/').pop() : 'Untitled'
   const showLargeDocBadge = documentTier !== 'standard' && !largeDocModeDismissed
+  const assistantOpen = rightPanel === 'assistant'
+  const optionsOpen = rightPanel === 'documentOptions'
 
   /**
    * Moves the active view mode left/right with arrow keys (standard macOS
@@ -85,7 +87,6 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
               type="button"
               role="tab"
               aria-selected={viewMode === mode}
-              tabIndex={viewMode === mode ? 0 : -1}
               className={`view-mode-tab ${viewMode === mode ? 'view-mode-tab--active' : ''}`}
               onClick={() => setViewMode(mode)}
               title={`${label} (${shortcut})`}
@@ -114,7 +115,8 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
           className="text-[11px] text-content-secondary [font-variant-numeric:tabular-nums]"
           data-testid="word-count"
         >
-          {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars · {readingTimeMinutes} min read
+          {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars · {readingTimeMinutes}{' '}
+          min read
         </span>
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="max-w-[120px] truncate text-[11px] text-content-secondary">{title}</span>
@@ -130,10 +132,21 @@ export function Toolbar({ onSearchOpen }: ToolbarProps) {
         </span>
         <button
           type="button"
-          className={`toolbar-icon-btn toolbar-icon-btn--header no-drag ${assistantVisible ? 'toolbar-icon-btn--active' : ''}`}
-          onClick={toggleAssistant}
-          aria-label={assistantVisible ? 'Hide assistant' : 'Show assistant'}
-          aria-pressed={assistantVisible}
+          className={`toolbar-icon-btn toolbar-icon-btn--header no-drag ${optionsOpen ? 'toolbar-icon-btn--active' : ''}`}
+          onClick={() => toggleRightPanel('documentOptions')}
+          aria-label={optionsOpen ? 'Hide document options' : 'Show document options'}
+          aria-pressed={optionsOpen}
+          title="Document Options (⌘⇧O)"
+          data-testid="document-options-toggle"
+        >
+          <Settings2 />
+        </button>
+        <button
+          type="button"
+          className={`toolbar-icon-btn toolbar-icon-btn--header no-drag ${assistantOpen ? 'toolbar-icon-btn--active' : ''}`}
+          onClick={() => toggleRightPanel('assistant')}
+          aria-label={assistantOpen ? 'Hide assistant' : 'Show assistant'}
+          aria-pressed={assistantOpen}
           title="Toggle Assistant (⌘⇧A)"
           data-testid="assistant-toggle"
         >

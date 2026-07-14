@@ -58,3 +58,11 @@ export function getStyleSidecarPath(documentPath: string): string {
   const base = documentPath.replace(/\.(md|markdown|mdown|mkd)$/i, '')
   return `${base}.markdoc-style.json`
 }
+
+/**
+ * Returns the heading-numbering sidecar path for a given document path.
+ */
+export function getNumberingSidecarPath(documentPath: string): string {
+  const base = documentPath.replace(/\.(md|markdown|mdown|mkd)$/i, '')
+  return `${base}.markdoc-numbering.json`
+}

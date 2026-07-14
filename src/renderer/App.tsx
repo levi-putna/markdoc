@@ -11,13 +11,20 @@ import { SearchOverlay, useSearchShortcut } from './components/SearchOverlay'
 import { FindReplaceDialog } from './components/FindReplaceDialog'
 import { ImageInsertDialog } from './components/ImageInsertDialog'
 import { StyleOverridesPanel } from './components/StyleOverridesPanel'
+import { DocumentOptionsPanel } from './components/DocumentOptionsPanel'
 import { ExportDialog } from './components/ExportDialog'
 import { flattenOutline } from '@shared/document-index'
 import { findHeadingCharOffset } from '@shared/markdown-highlight'
 import { parseMarkdownAsync } from '@shared/markdown-async'
 import {
   moveSectionInEditor,
+  shiftSectionNestingInEditor,
 } from '@shared/outline-sync'
+import {
+  syncHeadingNumbersInEditor,
+  clearHeadingNumbersInEditor,
+} from '@shared/heading-numbering-apply'
+import { computeHeadingNumbers } from '@shared/heading-numbering'
 import type { FlatOutlineItem } from '@shared/types'
 import type { StyleOverride, WindowState } from '@shared/ipc'
 import { useAppTheme } from './hooks/use-app-theme'
@@ -77,10 +84,11 @@ function DocumentWindow() {
     setHighlightRange,
     setViewMode,
     setSidebarWidth,
-    assistantVisible,
-    assistantWidth,
+    rightPanel,
+    rightPanelWidth,
     setAssistantVisible,
-    setAssistantWidth,
+    openRightPanel,
+    setRightPanelWidth,
     pendingSuggestionCount,
     pendingSuggestionIds,
     suggestionResolutions,
@@ -90,6 +98,9 @@ function DocumentWindow() {
     recordSuggestionResolutions,
     documentSessionId,
     setAiModels,
+    setNumberingConfig,
+    setNumberingOverrides,
+    setHeadingNumbers,
   } = useDocumentStore()
 
   const [previewHtml, setPreviewHtml] = useState('')
@@ -150,8 +161,8 @@ function DocumentWindow() {
         viewMode,
         sidebarVisible,
         sidebarWidth,
-        assistantVisible,
-        assistantWidth,
+        rightPanel,
+        rightPanelWidth,
       }
       void window.markdoc.saveWindowState(state)
     }
@@ -162,7 +173,7 @@ function DocumentWindow() {
       window.removeEventListener('beforeunload', saveState)
       saveState()
     }
-  }, [filePath, viewMode, sidebarVisible, sidebarWidth, assistantVisible, assistantWidth])
+  }, [filePath, viewMode, sidebarVisible, sidebarWidth, rightPanel, rightPanelWidth])
 
   // Restore window state from previous session
   useEffect(() => {
@@ -171,10 +182,12 @@ function DocumentWindow() {
       setViewMode(state.viewMode)
       if (!state.sidebarVisible) useDocumentStore.getState().toggleSidebar()
       setSidebarWidth(state.sidebarWidth)
-      setAssistantVisible(state.assistantVisible ?? false)
-      setAssistantWidth(state.assistantWidth ?? 320)
+      const panel =
+        state.rightPanel ?? (state.assistantVisible ? 'assistant' : null)
+      if (panel) openRightPanel(panel)
+      setRightPanelWidth(state.rightPanelWidth ?? state.assistantWidth ?? 320)
     })
-  }, [setViewMode, setSidebarWidth, setAssistantVisible, setAssistantWidth])
+  }, [setViewMode, setSidebarWidth, openRightPanel, setRightPanelWidth])
 
   // Load preferences on mount (theme handling lives in useAppTheme)
   useEffect(() => {
@@ -351,6 +364,54 @@ function DocumentWindow() {
     setStyleDraft({ version: 1, ...overrides })
   }, [setStyleOverrides])
 
+  const loadNumberingForDocument = useCallback(
+    async (path: string) => {
+      if (!window.markdoc) return
+      const { config, overrides } = await window.markdoc.loadNumbering(path)
+      setNumberingConfig(config)
+      setNumberingOverrides(overrides)
+    },
+    [setNumberingConfig, setNumberingOverrides]
+  )
+
+  /**
+   * Writes numbering config to the sidecar (when the document is saved) and
+   * re-applies or clears numbering in the live editor.
+   */
+  const persistAndApplyNumbering = useCallback(async () => {
+    const editor = editorRef.current
+    const { numberingConfig: config, numberingOverrides: overrides, outline: currentOutline } =
+      useDocumentStore.getState()
+
+    if (filePath && window.markdoc) {
+      await window.markdoc.saveNumbering({
+        documentPath: filePath,
+        config,
+        overrides,
+      })
+    }
+
+    if (editor) {
+      if (config.enabled) {
+        syncHeadingNumbersInEditor({ editor, config, overrides })
+        const numberMap = computeHeadingNumbers({
+          outline: currentOutline,
+          config,
+          overridesByHeadingId: overrides,
+        })
+        const labels: Record<string, string> = {}
+        for (const [id, result] of numberMap) {
+          labels[id] = result.displayLabel
+        }
+        setHeadingNumbers(labels)
+      } else {
+        clearHeadingNumbersInEditor({ editor })
+        setHeadingNumbers({})
+      }
+      setDirty(true)
+    }
+  }, [filePath, setHeadingNumbers, setDirty])
+
   const checkImages = useCallback(async (path: string, md: string) => {
     if (!window.markdoc) return
     const broken = await window.markdoc.checkBrokenImages({ documentPath: path, markdown: md })
@@ -429,6 +490,7 @@ function DocumentWindow() {
         setDirty(false)
         await window.markdoc.watchFile(path)
         await loadStyleForDocument(path)
+        await loadNumberingForDocument(path)
         await checkImages(path, content)
       } catch (error) {
         // Surface load failures (missing/unreadable file, parse errors) instead
@@ -437,7 +499,7 @@ function DocumentWindow() {
         window.alert(`Couldn't open “${path.split('/').pop()}”.\n\n${(error as Error).message ?? error}`)
       }
     },
-    [isDirty, setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown, loadStyleForDocument, checkImages]
+    [isDirty, setMarkdown, syncPreviewFromMarkdown, syncIndexFromMarkdown, loadStyleForDocument, loadNumberingForDocument, checkImages]
   )
 
   const handleSave = useCallback(async () => {
@@ -446,6 +508,12 @@ function DocumentWindow() {
     if (!path) return
 
     await window.markdoc.writeFile({ filePath: path, markdown, frontMatter })
+    const { numberingConfig: config, numberingOverrides: overrides } = useDocumentStore.getState()
+    await window.markdoc.saveNumbering({
+      documentPath: path,
+      config,
+      overrides,
+    })
     setFilePath(path)
     setDirty(false)
     await window.markdoc.clearRecovery(path)
@@ -469,6 +537,13 @@ function DocumentWindow() {
       await syncIndexFromMarkdown(result.markdown)
     }
 
+    const { numberingConfig: config, numberingOverrides: overrides } = useDocumentStore.getState()
+    await window.markdoc.saveNumbering({
+      documentPath: path,
+      config,
+      overrides,
+    })
+
     setFilePath(path)
     setDirty(false)
     await window.markdoc.watchFile(path)
@@ -486,7 +561,12 @@ function DocumentWindow() {
       window.markdoc.onMenuAction('save', () => handleSave()),
       window.markdoc.onMenuAction('save-as', () => handleSaveAs()),
       window.markdoc.onMenuAction('toggle-sidebar', () => useDocumentStore.getState().toggleSidebar()),
-      window.markdoc.onMenuAction('toggle-assistant', () => useDocumentStore.getState().toggleAssistant()),
+      window.markdoc.onMenuAction('toggle-assistant', () =>
+        useDocumentStore.getState().toggleRightPanel('assistant')
+      ),
+      window.markdoc.onMenuAction('toggle-document-options', () =>
+        useDocumentStore.getState().toggleRightPanel('documentOptions')
+      ),
       window.markdoc.onMenuAction('view-mode', (mode) =>
         useDocumentStore.getState().setViewMode(mode as 'edit' | 'markdown' | 'preview' | 'split')
       ),
@@ -547,7 +627,23 @@ function DocumentWindow() {
     editorRef.current = editor
     setHasSelection(!editor.state.selection.empty)
     flushPendingSuggestionsRef.current?.(editor)
-  }, [])
+
+    const { numberingConfig: config, numberingOverrides: overrides, outline: currentOutline } =
+      useDocumentStore.getState()
+    if (config.enabled) {
+      syncHeadingNumbersInEditor({ editor, config, overrides })
+      const numberMap = computeHeadingNumbers({
+        outline: currentOutline,
+        config,
+        overridesByHeadingId: overrides,
+      })
+      const labels: Record<string, string> = {}
+      for (const [id, result] of numberMap) {
+        labels[id] = result.displayLabel
+      }
+      setHeadingNumbers(labels)
+    }
+  }, [setHeadingNumbers])
 
   const handleEditorContentChange = useCallback(
     ({ html }: { markdown: string; html: string }) => {
@@ -618,6 +714,31 @@ function DocumentWindow() {
 
       moveSectionInEditor({ editor, activeItem, overItem, projectedDepth })
       setDirty(true)
+
+      const { numberingConfig: config, numberingOverrides: overrides } = useDocumentStore.getState()
+      if (config.enabled) {
+        syncHeadingNumbersInEditor({ editor, config, overrides })
+      }
+    },
+    [setDirty]
+  )
+
+  /**
+   * Indents or outdents an outline heading section, then re-syncs numbering.
+   */
+  const handleOutlineNestingShift = useCallback(
+    ({ item, delta }: { item: FlatOutlineItem; delta: 1 | -1 }) => {
+      const editor = editorRef.current
+      if (!editor) return
+
+      const changed = shiftSectionNestingInEditor({ editor, item, delta })
+      if (!changed) return
+
+      setDirty(true)
+      const { numberingConfig: config, numberingOverrides: overrides } = useDocumentStore.getState()
+      if (config.enabled) {
+        syncHeadingNumbersInEditor({ editor, config, overrides })
+      }
     },
     [setDirty]
   )
@@ -769,7 +890,13 @@ function DocumentWindow() {
       {/* Main content area */}
       <div className="relative flex flex-1 overflow-hidden">
         {sidebarVisible && (
-          <OutlineSidebar onJumpTo={handleJumpToOutline} onReorder={handleOutlineReorder} />
+          <OutlineSidebar
+            onJumpTo={handleJumpToOutline}
+            onReorder={handleOutlineReorder}
+            onIndent={(item) => handleOutlineNestingShift({ item, delta: 1 })}
+            onOutdent={(item) => handleOutlineNestingShift({ item, delta: -1 })}
+            onNumberingOverrideChange={() => void persistAndApplyNumbering()}
+          />
         )}
 
         <div className="flex flex-1 overflow-hidden">
@@ -816,7 +943,7 @@ function DocumentWindow() {
           )}
         </div>
 
-        {assistantVisible && (
+        {rightPanel === 'assistant' && (
           <AssistantPanel
             sessionId={documentSessionId}
             hasSelection={hasSelection}
@@ -834,6 +961,10 @@ function DocumentWindow() {
             onRejectAllSuggestions={handleRejectAllSuggestions}
             onFocusSuggestion={handleFocusSuggestion}
           />
+        )}
+
+        {rightPanel === 'documentOptions' && (
+          <DocumentOptionsPanel onNumberingChange={() => void persistAndApplyNumbering()} />
         )}
       </div>
 

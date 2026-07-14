@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "enabled": true,
+  "preset": "decimal",
+  "displayMode": "full",
+  "showNumbersInMentions": true,
+  "overrides": {
+    "scope-heading": {
+      "preset": "classic"
+    }
+  }
+}

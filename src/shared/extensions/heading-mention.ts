@@ -5,6 +5,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { SuggestionOptions } from '@tiptap/suggestion'
 import {
   buildHeadingLookup,
+  getHeadingMentionDisplayLabel,
   getHeadingMentionLabel,
   listHeadingsForMention,
   type ResolvedHeading,
@@ -126,10 +127,13 @@ export const HeadingMention = Mention.extend({
   renderHTML({ node, HTMLAttributes }) {
     const headingId = node.attrs.headingId as string
     const cachedLabel = node.attrs.label as string | null
-    const { label, broken } = getHeadingMentionLabel({
+    const showNumbersInMentions =
+      this.storage.mentionDisplay?.showNumbersInMentions ?? false
+    const { display, broken } = getHeadingMentionDisplayLabel({
       doc: this.editor!.state.doc,
       headingId,
       cachedLabel,
+      showNumbersInMentions,
     })
 
     return [
@@ -137,29 +141,36 @@ export const HeadingMention = Mention.extend({
       mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
         'data-heading-mention': '',
         'data-heading-id': headingId,
-        'data-label': label,
+        'data-label': display,
         'data-broken': broken ? 'true' : null,
         href: `heading://${headingId}`,
         class: broken ? 'heading-mention heading-mention--broken' : 'heading-mention',
       }),
-      `@${label}`,
+      display,
     ]
   },
 
   renderText({ node }) {
-    const { label } = getHeadingMentionLabel({
+    const showNumbersInMentions =
+      this.storage.mentionDisplay?.showNumbersInMentions ?? false
+    const { display } = getHeadingMentionDisplayLabel({
       doc: this.editor!.state.doc,
       headingId: node.attrs.headingId,
       cachedLabel: node.attrs.label,
+      showNumbersInMentions,
     })
-    return `@${label}`
+    return display
   },
 
   addStorage() {
     return {
+      mentionDisplay: {
+        showNumbersInMentions: true,
+      },
       markdown: {
         serialize(this: { editor: Editor }, state: { write: (text: string) => void }, node: ProseMirrorNode) {
           const headingId = node.attrs.headingId as string
+          // Markdown keeps the bare title — numbering is document display only.
           const { label } = getHeadingMentionLabel({
             doc: this.editor.state.doc,
             headingId,
@@ -222,4 +233,21 @@ export function createHeadingMentionExtension({
     deleteTriggerWithBackspace: true,
     suggestion: createHeadingMentionSuggestion({ suggestion }),
   })
+}
+
+/**
+ * Syncs whether @heading mentions should show computed number prefixes.
+ */
+export function setHeadingMentionNumberDisplay({
+  editor,
+  showNumbersInMentions,
+}: {
+  editor: Editor
+  showNumbersInMentions: boolean
+}): void {
+  const storage = editor.storage.headingMention as
+    | { mentionDisplay?: { showNumbersInMentions?: boolean } }
+    | undefined
+  if (!storage?.mentionDisplay) return
+  storage.mentionDisplay.showNumbersInMentions = showNumbersInMentions
 }

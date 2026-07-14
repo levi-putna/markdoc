@@ -76,3 +76,49 @@ export function computeHeadingLevelDelta({
   const targetLevel = depthToHeadingLevel(projectedDepth)
   return targetLevel - originalLevel
 }
+
+/**
+ * Finds the previous sibling of `item` at the same outline depth, if any.
+ */
+export function findPreviousSibling({
+  item,
+  flatItems,
+}: {
+  item: FlatOutlineItem
+  flatItems: FlatOutlineItem[]
+}): FlatOutlineItem | null {
+  const index = flatItems.findIndex((entry) => entry.id === item.id)
+  if (index <= 0) return null
+
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const candidate = flatItems[i]
+    if (candidate.depth < item.depth) return null
+    if (candidate.depth === item.depth) return candidate
+  }
+  return null
+}
+
+/**
+ * Returns whether the heading can be indented under the sibling above it.
+ */
+export function canIndentOutlineItem({
+  item,
+  flatItems,
+}: {
+  item: FlatOutlineItem
+  flatItems: FlatOutlineItem[]
+}): boolean {
+  if (item.level >= 6) return false
+  return findPreviousSibling({ item, flatItems }) != null
+}
+
+/**
+ * Returns whether the heading can be outdented to become a peer of its parent.
+ */
+export function canOutdentOutlineItem({
+  item,
+}: {
+  item: FlatOutlineItem
+}): boolean {
+  return item.depth > 0 && item.level > 1
+}

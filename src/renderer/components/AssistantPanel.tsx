@@ -706,8 +706,8 @@ export function AssistantPanel({
 }: AssistantPanelProps) {
   const preferences = useDocumentStore((s) => s.preferences)
   const filePath = useDocumentStore((s) => s.filePath)
-  const assistantWidth = useDocumentStore((s) => s.assistantWidth)
-  const setAssistantWidth = useDocumentStore((s) => s.setAssistantWidth)
+  const rightPanelWidth = useDocumentStore((s) => s.rightPanelWidth)
+  const setRightPanelWidth = useDocumentStore((s) => s.setRightPanelWidth)
   const wordCount = useDocumentStore((s) => s.wordCount)
   const aiModels = useDocumentStore((s) => s.aiModels)
 
@@ -814,12 +814,12 @@ export function AssistantPanel({
   const handleResizeStart = (event: React.MouseEvent) => {
     event.preventDefault()
     const startX = event.clientX
-    const startWidth = assistantWidth || DEFAULT_WIDTH
+    const startWidth = rightPanelWidth || DEFAULT_WIDTH
 
     const onMove = (moveEvent: MouseEvent) => {
       const delta = startX - moveEvent.clientX
       const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta))
-      setAssistantWidth(next)
+      setRightPanelWidth(next)
     }
 
     const onUp = () => {
@@ -848,7 +848,7 @@ export function AssistantPanel({
   return (
     <aside
       className="assistant-panel relative flex shrink-0 flex-col border-l border-border-subtle"
-      style={{ width: assistantWidth || DEFAULT_WIDTH }}
+      style={{ width: rightPanelWidth || DEFAULT_WIDTH }}
       data-testid="assistant-panel"
     >
       {/* Resize handle */}
@@ -897,7 +897,9 @@ export function AssistantPanel({
             </div>
           </>
         ) : (
-          <span className="sr-only">Assistant</span>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-content-secondary">
+            Assistant
+          </span>
         )}
       </div>
 

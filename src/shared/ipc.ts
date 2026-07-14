@@ -59,6 +59,9 @@ export const IPC_CHANNELS = {
   STYLE_LOAD: 'style:load',
   STYLE_SAVE: 'style:save',
   STYLE_RESET: 'style:reset',
+  NUMBERING_LOAD: 'numbering:load',
+  NUMBERING_SAVE: 'numbering:save',
+  NUMBERING_RESET: 'numbering:reset',
   WINDOW_SAVE_STATE: 'window:save-state',
   SESSION_SAVE: 'session:save',
   FILE_DUPLICATE: 'file:duplicate',
@@ -139,14 +142,21 @@ export interface AppPreferences {
   aiDebugLogEnabled: boolean
 }
 
+/** Which right-docked panel is open (mutually exclusive). */
+export type RightPanel = null | 'assistant' | 'documentOptions'
+
 export interface WindowState {
   filePath: string | null
   bounds: { x: number; y: number; width: number; height: number }
   viewMode: ViewMode
   sidebarVisible: boolean
   sidebarWidth: number
-  assistantVisible: boolean
-  assistantWidth: number
+  /** @deprecated Prefer rightPanel — kept for session migration. */
+  assistantVisible?: boolean
+  /** @deprecated Prefer rightPanelWidth — kept for session migration. */
+  assistantWidth?: number
+  rightPanel?: RightPanel
+  rightPanelWidth?: number
 }
 
 export type { ChatSendPayload, ChatStreamChunk, DocumentSnapshot, SuggestionDecorationPayload, ApplyEditPayload }
@@ -285,6 +295,14 @@ export interface StyleOverride {
   tableStriping?: boolean
   blockquoteStyle?: string
 }
+
+export type {
+  NumberingConfig,
+  NumberingSidecar,
+  HeadingNumberingOverride,
+  NumberingPreset,
+  DisplayMode,
+} from './heading-numbering'
 
 export interface AssetWritePayload {
   documentPath: string

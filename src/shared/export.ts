@@ -290,8 +290,8 @@ function convertInline({
           ? node.attrs.label.trim()
           : null
       const text = liveLabel
-        ? `@${liveLabel}`
-        : `@${cachedLabel ?? HEADING_DELETED_LABEL}`
+        ? liveLabel
+        : cachedLabel ?? HEADING_DELETED_LABEL
 
       if (liveLabel) {
         runs.push(

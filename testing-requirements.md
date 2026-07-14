@@ -70,7 +70,7 @@ Primary goals: catch regressions in Markdown round-trip fidelity (the riskiest a
 
 | ID | Requirement |
 |----|-------------|
-| QR-7.1 | A fixtures directory must contain: (a) a document exercising every GFM construct in `functional-requirements.md` Section 8, individually and in combination; (b) documents with valid and deliberately invalid Mermaid diagrams; (c) documents with front matter, with and without body content; (d) documents referencing images via relative paths, including at least one intentionally broken reference; (e) a document with a style-override sidecar file applied; (f) a document with heading mentions (`[@…](heading://…)`) and ATX headings carrying `{#id}` suffixes for MarkDoc-specific round-trip tests. |
+| QR-7.1 | A fixtures directory must contain: (a) a document exercising every GFM construct in `functional-requirements.md` Section 8, individually and in combination; (b) documents with valid and deliberately invalid Mermaid diagrams; (c) documents with front matter, with and without body content; (d) documents referencing images via relative paths, including at least one intentionally broken reference; (e) a document with a style-override sidecar file applied; (f) a document with heading mentions (`[@…](heading://…)`) and ATX headings carrying `{#id}` suffixes for MarkDoc-specific round-trip tests; (g) a document with a heading-numbering sidecar (`.markdoc-numbering.json`) covering enabled numbering, a non-default preset, display mode, and at least one per-heading override. |
 | QR-7.2 | Where practical, the CommonMark spec's official test suite (or a representative subset) should be used to validate baseline Markdown parsing/serialization fidelity, supplementing MarkDoc-specific fixtures. |
 | QR-7.3 | Fixtures must be treated as test code: reviewed in PRs, and updated deliberately (not silently) when intentional behavior changes require updating an expected snapshot. |
 | QR-7.4 | AI fixtures must include: (a) serialised `UIMessage[]` conversation threads for per-document history tests; (b) mocked gateway stream chunks (text, tool-call, tool-result, error) for assistant UI tests; (c) mock gateway error payloads for insufficient credit (402/403), invalid key (401), rate limit (429), and timeout; (d) a short document with duplicate heading titles for heading-reference collision tests. |
@@ -264,6 +264,34 @@ Each row is a representative test case; area codes map to `functional-requiremen
 | TC-MENTION.14 | Typing `@` (or using the toolbar Mention control) opens the heading suggestion popup; selecting an item inserts a mention of that heading. | Component / Integration |
 | TC-MENTION.15 | Clicking a non-broken mention in the editor jumps to the heading via the same path as outline click (FR-2.15); it must not trigger an OS "open URL" dialog for `heading://`. | Integration |
 | TC-MENTION.16 | The suggestion popup opens downward when the caret is in the top half of the viewport and upward when in the bottom half. | Component |
+| TC-MENTION.17 | With document numbering enabled and “show numbers in mentions” on, resolved mention display labels include the heading number; with the setting off (or numbering disabled), the bare heading title is shown. Broken mentions never receive a number prefix. | Unit |
+
+**Heading Numbering (`TC-NUMBER`) — verifies document heading numbering (editor attrs, markdown serialise, sidecar, outline/mentions)**
+
+Numbers are stored on the heading node (`headingNumberLabel` / `data-heading-number`), rendered in the editor via CSS, and written into Markdown on serialise. Bare title text in the editor must remain unprefixed. Per-document settings live in `<doc>.markdoc-numbering.json`.
+
+| ID | Test Case | Level |
+|----|-----------|-------|
+| TC-NUMBER.1 | Each built-in preset (`decimal`, `classic`, `legalMilitary`, `chapter`) produces the expected label sequence for a multi-level outline. | Unit |
+| TC-NUMBER.2 | `displayMode` of `full`, `lastSegment`, and `lastTwoSegments` truncates labels correctly for decimal (and does not crash for classic/chapter). | Unit |
+| TC-NUMBER.3 | When numbering is disabled, `computeHeadingNumbers` returns an empty map. | Unit |
+| TC-NUMBER.4 | Per-heading overrides apply to that heading’s **children** (not the override root), including preset overrides and alpha/Roman hybrid `levelFormats`. | Unit |
+| TC-NUMBER.5 | Nested / stacked overrides resolve from the nearest ancestor override. | Unit |
+| TC-NUMBER.6 | Skip-level outlines (e.g. H1 followed by H3), deep headings (H4–H6), empty outlines, and single-heading docs all produce stable labels without throwing. | Unit |
+| TC-NUMBER.7 | `stripNumberingPrefix` / `migrateLegacyNumberedHeadingText` strip unambiguous decimal/chapter/paren prefixes, but never mangle prose titles that look like classic tokens (`I Love Cats`, `A complete guide`). | Unit |
+| TC-NUMBER.8 | Sidecar parse/serialise round-trips `enabled`, `preset`, `displayMode`, `trailingZero`, `showNumbersInMentions`, and `overrides`; invalid/missing payloads fall back to defaults. | Unit |
+| TC-NUMBER.9 | `getNumberingSidecarPath` maps `notes.md` → `notes.markdoc-numbering.json` for supported Markdown extensions. | Unit |
+| TC-NUMBER.10 | `loadNumberingSidecar` / `saveNumberingSidecar` / `resetNumberingSidecar` persist and clear config on disk; missing or corrupt files return defaults without throwing. | Unit |
+| TC-NUMBER.11 | Enabling numbering writes labels into serialised Markdown (`# 1 Title`) while keeping editor `textContent` bare; disabling/clearing removes numbers from serialised Markdown. | Unit |
+| TC-NUMBER.12 | Syncing numbering preserves persistent `{#headingId}` suffixes on serialise. | Unit |
+| TC-NUMBER.13 | Reloading Markdown that already contains inline numbers migrates them out of editor text once and does not double-prefix on the next sync. | Unit |
+| TC-NUMBER.14 | Switching presets (classic → decimal) does not leave stacked residual tokens when numbers were applied via attrs; ambiguous classic prose prefixes are left alone. | Unit |
+| TC-NUMBER.15 | Inserting/reordering headings and re-syncing renumbers subsequent siblings correctly. | Unit |
+| TC-NUMBER.16 | Sync/clear transactions are tagged as numbering transactions (`isHeadingNumberingTransaction`) and do not need to be undoable history steps (`addToHistory: false`). | Unit |
+| TC-NUMBER.17 | `getPresetPreviewLabels` returns a non-empty label list for every preset (powers the Document Options live preview). | Unit |
+| TC-NUMBER.18 | Outline nesting changes that alter heading depth (indent/outdent / drag) followed by numbering sync update labels to match the new hierarchy (cross-ref `TC-OUTLINE.7`). | Unit / Integration |
+| TC-NUMBER.19 | Document Options: enabling numbering, changing preset/display mode, and toggling “show numbers in mentions” updates store state and triggers persist/re-sync (smoke). | Component / Manual |
+| TC-NUMBER.20 | Outline context menu numbering overrides (preset / alpha-Roman / display depth / clear) update overrides and re-sync child labels. | Component / Manual |
 
 **Preferences (`TC-PREFS`) — verifies FR-13.x**
 
@@ -332,7 +360,7 @@ Each row is a representative test case; area codes map to `functional-requiremen
 
 ### 3.4 Regression / Smoke Suite (Per-PR Gate)
 
-A fast subset (~15–20 test cases, target under 5 minutes total) must run on every PR, covering at minimum: TC-EDIT.1–2, TC-PREVIEW.1, TC-OUTLINE.3, TC-OUTLINE.6, TC-OUTLINE.9, TC-HEADER.2–3, TC-SEARCH.1–2, TC-FILE.1–2, TC-FILE.7, TC-FILE.9, TC-CLI.2, TC-MD.1–2 (subset), TC-DIAG.1–2, TC-STYLE.1, TC-IMG.1, TC-EXPORT.1–2, TC-PERF.2, **TC-MENTION.1, TC-MENTION.6–8, TC-MENTION.12**, **TC-AI.1, TC-AI.6–7, TC-AI.9, TC-AI.13, TC-AIA.1–2**. The full suite in Section 3.3 runs pre-release and on main-branch merges (QR-6.1/QR-6.2); the nightly-only performance cases (TC-PERF.1, .3, .5, .7 — QR-4.1) run on their own schedule rather than gating every PR.
+A fast subset (~15–20 test cases, target under 5 minutes total) must run on every PR, covering at minimum: TC-EDIT.1–2, TC-PREVIEW.1, TC-OUTLINE.3, TC-OUTLINE.6, TC-OUTLINE.9, TC-HEADER.2–3, TC-SEARCH.1–2, TC-FILE.1–2, TC-FILE.7, TC-FILE.9, TC-CLI.2, TC-MD.1–2 (subset), TC-DIAG.1–2, TC-STYLE.1, TC-IMG.1, TC-EXPORT.1–2, TC-PERF.2, **TC-MENTION.1, TC-MENTION.6–8, TC-MENTION.12, TC-MENTION.17**, **TC-NUMBER.1, TC-NUMBER.4, TC-NUMBER.7, TC-NUMBER.8, TC-NUMBER.10–13**, **TC-AI.1, TC-AI.6–7, TC-AI.9, TC-AI.13, TC-AIA.1–2**. The full suite in Section 3.3 runs pre-release and on main-branch merges (QR-6.1/QR-6.2); the nightly-only performance cases (TC-PERF.1, .3, .5, .7 — QR-4.1) run on their own schedule rather than gating every PR.
 
 ### 3.5 Manual QA Checklist (Pre-Release)
 
@@ -352,6 +380,7 @@ Items that are impractical or low-value to fully automate, to be walked through 
 - **AI manual smoke (optional, requires user's gateway key):** enable AI, send a summarise prompt, verify streaming response, verify Suggestion-mode edit accept/reject on a short fixture document, verify conversation persists after close/reopen of the same file.
 - Visual inspection of one exported PDF and one exported DOCX file opened in Preview.app and Microsoft Word/Pages respectively, confirming they look correct to a human, not just structurally correct to an automated parser.
 - **Heading mentions:** type `@` (and use the toolbar Mention button) to insert a mention; rename/move/delete the target heading and confirm live label / broken-state behaviour; click a mention and confirm it jumps like the outline without an OS URL dialog; confirm the suggestion popup flips above the caret near the bottom of the viewport.
+- **Heading numbering:** open Document Options → enable numbering; confirm numbers appear on headings in the editor (CSS prefix) and in the outline; switch preset (decimal → classic → chapter) and confirm labels update without mangling titles like “I Love Cats”; toggle “show numbers in mentions” and confirm @-mention chips update; right-click an outline heading, set a child numbering override, confirm only descendants change; save, quit, and reopen — numbering sidecar and overrides restore; disable numbering and confirm serialised Markdown loses the number prefixes while bare titles remain.
 
 ### 3.6 Release Exit Criteria
 

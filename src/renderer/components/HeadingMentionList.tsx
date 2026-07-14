@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react'
 import type { ResolvedHeading } from '@shared/heading-mention-resolve'
+import { formatHeadingMentionDisplay } from '@shared/heading-mention-resolve'
+import { useDocumentStore } from '../store/document-store'
 
 export interface HeadingMentionPickPayload {
   headingId: string
@@ -21,6 +23,12 @@ export interface HeadingMentionListRef {
 export const HeadingMentionList = forwardRef<HeadingMentionListRef, HeadingMentionListProps>(
   function HeadingMentionList({ items, command }, ref) {
     const [selectedIndex, setSelectedIndex] = useState(0)
+    const numberingEnabled = useDocumentStore((s) => s.numberingConfig.enabled)
+    const showNumbersInMentions = useDocumentStore(
+      (s) => s.numberingConfig.showNumbersInMentions ?? true
+    )
+    const headingNumbers = useDocumentStore((s) => s.headingNumbers)
+    const showMentionNumbers = numberingEnabled && showNumbersInMentions
 
     useEffect(() => {
       setSelectedIndex(0)
@@ -64,24 +72,37 @@ export const HeadingMentionList = forwardRef<HeadingMentionListRef, HeadingMenti
 
     return (
       <div className="heading-mention-list" data-testid="heading-mention-list" role="listbox">
-        {items.map((item, index) => (
-          <button
-            key={item.headingId}
-            type="button"
-            role="option"
-            aria-selected={index === selectedIndex}
-            className={`heading-mention-list__item${
-              index === selectedIndex ? ' heading-mention-list__item--selected' : ''
-            }`}
-            onMouseEnter={() => setSelectedIndex(index)}
-            onClick={() => selectItem(index)}
-          >
-            {/* Heading level badge */}
-            <span className="heading-mention-list__level">H{item.level}</span>
-            {/* Heading title */}
-            <span className="heading-mention-list__text">{item.text}</span>
-          </button>
-        ))}
+        {items.map((item, index) => {
+          const numberLabel = showMentionNumbers
+            ? headingNumbers[item.headingId]
+            : undefined
+          const displayText = formatHeadingMentionDisplay({
+            title: item.text,
+            numberLabel,
+            showNumber: showMentionNumbers,
+          })
+
+          return (
+            <button
+              key={item.headingId}
+              type="button"
+              role="option"
+              aria-selected={index === selectedIndex}
+              className={`heading-mention-list__item${
+                index === selectedIndex ? ' heading-mention-list__item--selected' : ''
+              }`}
+              onMouseEnter={() => setSelectedIndex(index)}
+              onClick={() => selectItem(index)}
+            >
+              {/* Number badge when enabled; otherwise H-level */}
+              <span className="heading-mention-list__level">
+                {numberLabel ?? `H${item.level}`}
+              </span>
+              {/* Heading title as it will appear in the mention chip */}
+              <span className="heading-mention-list__text">{displayText}</span>
+            </button>
+          )
+        })}
       </div>
     )
   }

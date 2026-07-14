@@ -1,10 +1,11 @@
 import type { Editor } from '@tiptap/core'
 import { ReactRenderer } from '@tiptap/react'
-import { listHeadingsForMention, shouldOpenMentionPopupUpwards } from '@shared/heading-mention-resolve'
+import { listHeadingsForMention } from '@shared/heading-mention-resolve'
 import {
   HeadingMentionList,
   type HeadingMentionListRef,
 } from '../components/HeadingMentionList'
+import { positionHeadingMentionPopup } from './heading-mention-popup-position'
 
 export interface HeadingMentionPick {
   headingId: string
@@ -26,34 +27,6 @@ export function closeHeadingMentionPicker(): void {
   if (!activePicker) return
   activePicker.cleanup()
   activePicker = null
-}
-
-/**
- * Positions a mention popup relative to an anchor rect, flipping above the
- * caret/chip when it sits in the bottom half of the viewport.
- */
-function positionMentionPopup({
-  popup,
-  rect,
-}: {
-  popup: HTMLDivElement
-  rect: DOMRect
-}): void {
-  const gap = 4
-  const openUpwards = shouldOpenMentionPopupUpwards({
-    caretTop: rect.top,
-    viewportHeight: window.innerHeight,
-  })
-
-  popup.style.left = `${Math.round(rect.left + window.scrollX)}px`
-
-  if (openUpwards) {
-    popup.style.top = `${Math.round(rect.top + window.scrollY - gap)}px`
-    popup.style.transform = 'translateY(-100%)'
-  } else {
-    popup.style.top = `${Math.round(rect.bottom + window.scrollY + gap)}px`
-    popup.style.transform = ''
-  }
 }
 
 /**
@@ -92,7 +65,7 @@ export function openHeadingMentionPicker({
   popup.className = 'heading-mention-popup'
   popup.appendChild(component.element)
   document.body.appendChild(popup)
-  positionMentionPopup({ popup, rect })
+  positionHeadingMentionPopup({ popup, anchorRect: rect })
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
@@ -120,7 +93,7 @@ export function openHeadingMentionPicker({
       closeHeadingMentionPicker()
       return
     }
-    positionMentionPopup({ popup, rect: next })
+    positionHeadingMentionPopup({ popup, anchorRect: next })
   }
 
   // Capture Escape / outside click after the opening click has finished.

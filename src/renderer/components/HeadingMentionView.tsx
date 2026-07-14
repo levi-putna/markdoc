@@ -1,7 +1,8 @@
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
-import { getHeadingMentionLabel } from '@shared/heading-mention-resolve'
+import { getHeadingMentionDisplayLabel } from '@shared/heading-mention-resolve'
 import { openHeadingMentionPicker } from '../utils/heading-mention-picker'
+import { useDocumentStore } from '../store/document-store'
 
 /**
  * Live React NodeView for heading mentions — resolves the current heading
@@ -16,17 +17,28 @@ import { openHeadingMentionPicker } from '../utils/heading-mention-picker'
 export function HeadingMentionView({ node, editor, getPos, updateAttributes }: NodeViewProps) {
   const headingId = node.attrs.headingId as string
   const cachedLabel = (node.attrs.label as string | null) ?? null
-  const [{ label, broken }, setResolved] = useState(() =>
-    getHeadingMentionLabel({ doc: editor.state.doc, headingId, cachedLabel })
+  const numberingEnabled = useDocumentStore((s) => s.numberingConfig.enabled)
+  const showNumbersInMentions = useDocumentStore(
+    (s) => s.numberingConfig.showNumbersInMentions ?? true
+  )
+
+  const [{ label, display, broken }, setResolved] = useState(() =>
+    getHeadingMentionDisplayLabel({
+      doc: editor.state.doc,
+      headingId,
+      cachedLabel,
+      showNumbersInMentions: numberingEnabled && showNumbersInMentions,
+    })
   )
 
   useEffect(() => {
     const refresh = () => {
       setResolved(
-        getHeadingMentionLabel({
+        getHeadingMentionDisplayLabel({
           doc: editor.state.doc,
           headingId,
           cachedLabel: (node.attrs.label as string | null) ?? cachedLabel,
+          showNumbersInMentions: numberingEnabled && showNumbersInMentions,
         })
       )
     }
@@ -36,7 +48,14 @@ export function HeadingMentionView({ node, editor, getPos, updateAttributes }: N
     return () => {
       editor.off('update', refresh)
     }
-  }, [editor, headingId, node.attrs.label, cachedLabel])
+  }, [
+    editor,
+    headingId,
+    node.attrs.label,
+    cachedLabel,
+    numberingEnabled,
+    showNumbersInMentions,
+  ])
 
   const navigate = () => {
     editor.view.dom.dispatchEvent(
@@ -77,12 +96,14 @@ export function HeadingMentionView({ node, editor, getPos, updateAttributes }: N
       className={broken ? 'heading-mention heading-mention--broken' : 'heading-mention'}
       data-heading-mention=""
       data-heading-id={headingId}
-      data-label={label}
+      data-label={display}
       data-broken={broken ? 'true' : undefined}
       role="link"
       tabIndex={0}
       title={broken ? 'Choose a heading to relink' : undefined}
-      aria-label={broken ? `Broken mention of ${label}. Choose a heading to relink.` : undefined}
+      aria-label={
+        broken ? `Broken mention of ${label}. Choose a heading to relink.` : undefined
+      }
       data-testid="heading-mention"
       onClick={(event: MouseEvent) => {
         event.preventDefault()
@@ -96,7 +117,8 @@ export function HeadingMentionView({ node, editor, getPos, updateAttributes }: N
         activate()
       }}
     >
-      @{label}
+      {/* Visible chip — may include the heading number when numbering is on */}
+      {display}
     </NodeViewWrapper>
   )
 }

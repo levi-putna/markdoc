@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import {
   BLOCK_TYPE_OPTIONS,
@@ -69,7 +69,7 @@ export function BlockTypeSelect({ editor }: BlockTypeSelectProps) {
             onClick={() => setOpen(false)}
           />
           <ul
-            className="absolute left-0 top-full z-50 mt-1 max-h-64 w-44 overflow-y-auto rounded-md border border-border-subtle bg-surface-primary py-1 shadow-lg"
+            className="absolute left-0 top-full z-50 mt-1 max-h-64 w-44 overflow-y-auto rounded-md border border-border-subtle bg-surface-primary p-1 shadow-lg"
             role="listbox"
           >
             {BLOCK_TYPE_OPTIONS.map((option) => {
@@ -81,8 +81,9 @@ export function BlockTypeSelect({ editor }: BlockTypeSelectProps) {
                     type="button"
                     role="option"
                     aria-selected={activeType === option.id}
-                    className={`flex w-full items-center gap-2 px-2.5 py-1 text-left text-[11px] hover:bg-black/5 dark:hover:bg-white/10 ${
-                      activeType === option.id ? 'bg-accent/10 text-accent' : 'text-content-text'
+                    aria-checked={activeType === option.id}
+                    className={`outline-numbering-menu__item${
+                      activeType === option.id ? ' outline-numbering-menu__item--active' : ''
                     }`}
                     onClick={() => {
                       setBlockType({ editor, blockType: option.id })
@@ -90,8 +91,18 @@ export function BlockTypeSelect({ editor }: BlockTypeSelectProps) {
                       setOpen(false)
                     }}
                   >
-                    <OptionIcon className="shrink-0" size={14} aria-hidden />
-                    {option.label}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <OptionIcon className="shrink-0" size={14} aria-hidden />
+                      <span className="outline-numbering-menu__item-label">{option.label}</span>
+                    </span>
+                    {activeType === option.id ? (
+                      <Check
+                        className="outline-numbering-menu__tick"
+                        size={14}
+                        strokeWidth={2.5}
+                        aria-hidden
+                      />
+                    ) : null}
                   </button>
                 </li>
               )

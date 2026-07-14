@@ -1,8 +1,13 @@
 import { create } from 'zustand'
-import type { ViewMode, AppPreferences } from '@shared/ipc'
+import type { ViewMode, AppPreferences, RightPanel } from '@shared/ipc'
 import type { OutlineNode, DocumentSizeTier } from '@shared/types'
 import type { GatewayModelInfo } from '@shared/ai/model-pricing'
 import { DEFAULT_PREFERENCES } from '@shared/ipc'
+import {
+  DEFAULT_NUMBERING_CONFIG,
+  type HeadingNumberingOverride,
+  type NumberingConfig,
+} from '@shared/heading-numbering'
 
 interface DocumentState {
   filePath: string | null
@@ -28,13 +33,18 @@ interface DocumentState {
   styleOverrides: Record<string, string>
   brokenImages: Array<{ src: string; line: number }>
   highlightRange: { from: number; to: number } | null
-  assistantVisible: boolean
-  assistantWidth: number
+  /** Mutually exclusive right dock: assistant or document options. */
+  rightPanel: RightPanel
+  rightPanelWidth: number
   pendingSuggestionCount: number
   pendingSuggestionIds: string[]
   suggestionResolutions: Record<string, 'accepted' | 'rejected'>
   aiModels: GatewayModelInfo[]
   documentSessionId: string
+  numberingConfig: NumberingConfig
+  numberingOverrides: Record<string, HeadingNumberingOverride>
+  /** Computed display labels keyed by headingId (derived, not persisted). */
+  headingNumbers: Record<string, string>
 }
 
 interface DocumentActions {
@@ -63,9 +73,12 @@ interface DocumentActions {
   setStyleOverrides: (overrides: Record<string, string>) => void
   setBrokenImages: (images: Array<{ src: string; line: number }>) => void
   setHighlightRange: (range: { from: number; to: number } | null) => void
-  toggleAssistant: () => void
+  openRightPanel: (panel: Exclude<RightPanel, null>) => void
+  toggleRightPanel: (panel: Exclude<RightPanel, null>) => void
+  closeRightPanel: () => void
+  setRightPanelWidth: (width: number) => void
+  /** @deprecated Prefer openRightPanel('assistant') — kept for call-site migration. */
   setAssistantVisible: (visible: boolean) => void
-  setAssistantWidth: (width: number) => void
   setPendingSuggestionCount: (count: number) => void
   setPendingSuggestionIds: (ids: string[]) => void
   setSuggestionResolution: ({
@@ -84,6 +97,16 @@ interface DocumentActions {
   }) => void
   clearSuggestionResolutions: () => void
   setAiModels: (models: GatewayModelInfo[]) => void
+  setNumberingConfig: (config: NumberingConfig) => void
+  setNumberingOverrides: (overrides: Record<string, HeadingNumberingOverride>) => void
+  setHeadingNumberingOverride: ({
+    headingId,
+    override,
+  }: {
+    headingId: string
+    override: HeadingNumberingOverride | null
+  }) => void
+  setHeadingNumbers: (numbers: Record<string, string>) => void
   reset: () => void
 }
 
@@ -111,13 +134,16 @@ const initialState: DocumentState = {
   styleOverrides: {},
   brokenImages: [],
   highlightRange: null,
-  assistantVisible: false,
-  assistantWidth: 320,
+  rightPanel: null,
+  rightPanelWidth: 320,
   pendingSuggestionCount: 0,
   pendingSuggestionIds: [],
   suggestionResolutions: {},
   aiModels: [],
   documentSessionId: crypto.randomUUID(),
+  numberingConfig: { ...DEFAULT_NUMBERING_CONFIG },
+  numberingOverrides: {},
+  headingNumbers: {},
 }
 
 /**
@@ -168,9 +194,12 @@ export const useDocumentStore = create<DocumentState & DocumentActions>((set) =>
   setStyleOverrides: (overrides) => set({ styleOverrides: overrides }),
   setBrokenImages: (images) => set({ brokenImages: images }),
   setHighlightRange: (range) => set({ highlightRange: range }),
-  toggleAssistant: () => set((s) => ({ assistantVisible: !s.assistantVisible })),
-  setAssistantVisible: (visible) => set({ assistantVisible: visible }),
-  setAssistantWidth: (width) => set({ assistantWidth: width }),
+  openRightPanel: (panel) => set({ rightPanel: panel }),
+  toggleRightPanel: (panel) =>
+    set((s) => ({ rightPanel: s.rightPanel === panel ? null : panel })),
+  closeRightPanel: () => set({ rightPanel: null }),
+  setRightPanelWidth: (width) => set({ rightPanelWidth: width }),
+  setAssistantVisible: (visible) => set({ rightPanel: visible ? 'assistant' : null }),
   setPendingSuggestionCount: (count) => set({ pendingSuggestionCount: count }),
   setPendingSuggestionIds: (ids) => set({ pendingSuggestionIds: ids }),
   setSuggestionResolution: ({ suggestionId, status }) =>
@@ -186,5 +215,26 @@ export const useDocumentStore = create<DocumentState & DocumentActions>((set) =>
     })),
   clearSuggestionResolutions: () => set({ suggestionResolutions: {} }),
   setAiModels: (models) => set({ aiModels: models }),
-  reset: () => set({ ...initialState, collapsedOutlineIds: new Set(), documentSessionId: crypto.randomUUID() }),
+  setNumberingConfig: (config) => set({ numberingConfig: config }),
+  setNumberingOverrides: (overrides) => set({ numberingOverrides: overrides }),
+  setHeadingNumberingOverride: ({ headingId, override }) =>
+    set((s) => {
+      const next = { ...s.numberingOverrides }
+      if (override === null) {
+        delete next[headingId]
+      } else {
+        next[headingId] = override
+      }
+      return { numberingOverrides: next }
+    }),
+  setHeadingNumbers: (numbers) => set({ headingNumbers: numbers }),
+  reset: () =>
+    set({
+      ...initialState,
+      collapsedOutlineIds: new Set(),
+      documentSessionId: crypto.randomUUID(),
+      numberingConfig: { ...DEFAULT_NUMBERING_CONFIG },
+      numberingOverrides: {},
+      headingNumbers: {},
+    }),
 }))

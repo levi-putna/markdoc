@@ -57,7 +57,7 @@ export function preprocessGfmExtensions(markdown: string): string {
         (_match, label: string, headingId: string) => {
           const safeLabel = escapeHtml(label)
           const safeId = escapeHtml(headingId)
-          return `<a data-heading-mention data-heading-id="${safeId}" href="heading://${safeId}" class="heading-mention">@${safeLabel}</a>`
+          return `<a data-heading-mention data-heading-id="${safeId}" href="heading://${safeId}" class="heading-mention">${safeLabel}</a>`
         }
       )
     }

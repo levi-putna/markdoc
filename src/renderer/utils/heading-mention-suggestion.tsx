@@ -5,38 +5,7 @@ import {
   type HeadingMentionListRef,
 } from '../components/HeadingMentionList'
 import type { HeadingMentionItem } from '@shared/extensions/heading-mention'
-import { shouldOpenMentionPopupUpwards } from '@shared/heading-mention-resolve'
-
-/**
- * Positions the live `@` suggestion popup; shared geometry with the relink picker.
- */
-function positionSuggestionPopup({
-  popup,
-  clientRect,
-}: {
-  popup: HTMLDivElement
-  clientRect?: (() => DOMRect | null) | null
-}): void {
-  if (!clientRect) return
-  const rect = clientRect()
-  if (!rect) return
-
-  const gap = 4
-  const openUpwards = shouldOpenMentionPopupUpwards({
-    caretTop: rect.top,
-    viewportHeight: window.innerHeight,
-  })
-
-  popup.style.left = `${Math.round(rect.left + window.scrollX)}px`
-
-  if (openUpwards) {
-    popup.style.top = `${Math.round(rect.top + window.scrollY - gap)}px`
-    popup.style.transform = 'translateY(-100%)'
-  } else {
-    popup.style.top = `${Math.round(rect.bottom + window.scrollY + gap)}px`
-    popup.style.transform = ''
-  }
-}
+import { positionHeadingMentionPopup } from './heading-mention-popup-position'
 
 /**
  * Creates TipTap suggestion render hooks that mount the heading mention popup
@@ -65,7 +34,9 @@ export function createHeadingMentionSuggestionRender() {
       popup.className = 'heading-mention-popup'
       popup.appendChild(component.element)
       document.body.appendChild(popup)
-      positionSuggestionPopup({ popup, clientRect: props.clientRect })
+
+      const rect = props.clientRect?.()
+      if (rect) positionHeadingMentionPopup({ popup, anchorRect: rect })
     },
 
     onUpdate: (props: SuggestionProps<HeadingMentionItem>) => {
@@ -78,7 +49,9 @@ export function createHeadingMentionSuggestionRender() {
           } as HeadingMentionItem)
         },
       })
-      if (popup) positionSuggestionPopup({ popup, clientRect: props.clientRect })
+
+      const rect = props.clientRect?.()
+      if (popup && rect) positionHeadingMentionPopup({ popup, anchorRect: rect })
     },
 
     onKeyDown: (props: SuggestionKeyDownProps) => {

@@ -27,9 +27,11 @@ import {
   type WindowDocumentSnapshot,
   type FileOpenRequestPayload,
 } from '../shared/ipc'
-import { parseMarkdownFile, serializeMarkdownFile, getAssetFolderPath, getStyleSidecarPath } from '../shared/file-utils'
+import { parseMarkdownFile, serializeMarkdownFile, getAssetFolderPath, getStyleSidecarPath, getNumberingSidecarPath } from '../shared/file-utils'
 import { exportToDocx, wrapStandaloneHtml } from '../shared/export'
 import { loadStyleOverrides, saveStyleOverrides } from '../shared/style-engine'
+import { loadNumberingSidecar, saveNumberingSidecar, resetNumberingSidecar } from '../shared/numbering-sidecar'
+import type { NumberingConfig, HeadingNumberingOverride } from '../shared/heading-numbering'
 import { findBrokenImageRefs, relativeAssetPath, generateImageFilename } from '../shared/asset-utils'
 import { rewriteAssetFolderInMarkdown, resolveLocalImagePath } from '../shared/image-paths'
 import { isRemoteImageSrc } from '../shared/image-src'
@@ -378,6 +380,13 @@ function createApplicationMenu(): void {
             getTargetWindow()?.webContents.send('menu:toggle-assistant')
           },
         },
+        {
+          label: 'Document Options',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => {
+            getTargetWindow()?.webContents.send('menu:toggle-document-options')
+          },
+        },
         { type: 'separator' },
         {
           label: 'Edit Only',
@@ -654,8 +663,10 @@ async function persistSessionState(): Promise<void> {
       viewMode: saved.viewMode ?? 'edit',
       sidebarVisible: saved.sidebarVisible ?? true,
       sidebarWidth: saved.sidebarWidth ?? 240,
-      assistantVisible: saved.assistantVisible ?? false,
-      assistantWidth: saved.assistantWidth ?? 320,
+      rightPanel:
+        saved.rightPanel ??
+        (saved.assistantVisible ? 'assistant' : null),
+      rightPanelWidth: saved.rightPanelWidth ?? saved.assistantWidth ?? 320,
     })
   }
   await preferencesStore.merge({ windowStates: states })
@@ -1070,6 +1081,38 @@ function registerIpcHandlers(): void {
     return { success: true }
   })
 
+  ipcMain.handle(IPC_CHANNELS.NUMBERING_LOAD, async (_, documentPath: string) => {
+    return loadNumberingSidecar(getNumberingSidecarPath(documentPath))
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.NUMBERING_SAVE,
+    async (
+      _,
+      {
+        documentPath,
+        config,
+        overrides,
+      }: {
+        documentPath: string
+        config: NumberingConfig
+        overrides?: Record<string, HeadingNumberingOverride>
+      }
+    ) => {
+      saveNumberingSidecar({
+        sidecarPath: getNumberingSidecarPath(documentPath),
+        config,
+        overrides,
+      })
+      return { success: true }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.NUMBERING_RESET, async (_, documentPath: string) => {
+    resetNumberingSidecar(getNumberingSidecarPath(documentPath))
+    return { success: true }
+  })
+
   ipcMain.handle(IPC_CHANNELS.WINDOW_SAVE_STATE, async (event, state: WindowState) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return
@@ -1109,6 +1152,10 @@ function registerIpcHandlers(): void {
         if (existsSync(sidecar)) {
           await cp(sidecar, getStyleSidecarPath(candidate))
         }
+        const numberingSidecar = getNumberingSidecarPath(filePath)
+        if (existsSync(numberingSidecar)) {
+          await cp(numberingSidecar, getNumberingSidecarPath(candidate))
+        }
         return { success: true, newPath: candidate }
       } catch (error) {
         return { success: false, error: (error as Error).message }
@@ -1130,6 +1177,10 @@ function registerIpcHandlers(): void {
         const sidecar = getStyleSidecarPath(filePath)
         if (existsSync(sidecar)) {
           await rename(sidecar, getStyleSidecarPath(newPath))
+        }
+        const numberingSidecar = getNumberingSidecarPath(filePath)
+        if (existsSync(numberingSidecar)) {
+          await rename(numberingSidecar, getNumberingSidecarPath(newPath))
         }
         return { success: true, newPath }
       } catch (error) {
@@ -1154,6 +1205,10 @@ function registerIpcHandlers(): void {
         const sidecar = getStyleSidecarPath(filePath)
         if (existsSync(sidecar)) {
           await rename(sidecar, getStyleSidecarPath(newPath))
+        }
+        const numberingSidecarMove = getNumberingSidecarPath(filePath)
+        if (existsSync(numberingSidecarMove)) {
+          await rename(numberingSidecarMove, getNumberingSidecarPath(newPath))
         }
         return { success: true, newPath }
       } catch (error) {

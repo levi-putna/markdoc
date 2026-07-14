@@ -17,6 +17,8 @@ import {
   type FileOperationResult,
   type StyleOverride,
   type WindowState,
+  type NumberingConfig,
+  type HeadingNumberingOverride,
   type ChatSendPayload,
   type ChatStreamChunk,
   type AiKeyTestResult,
@@ -221,6 +223,27 @@ const markdocApi = {
 
   resetStyleOverrides: (documentPath: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke(IPC_CHANNELS.STYLE_RESET, documentPath),
+
+  loadNumbering: (
+    documentPath: string
+  ): Promise<{
+    config: NumberingConfig
+    overrides: Record<string, HeadingNumberingOverride>
+  }> => ipcRenderer.invoke(IPC_CHANNELS.NUMBERING_LOAD, documentPath),
+
+  saveNumbering: ({
+    documentPath,
+    config,
+    overrides,
+  }: {
+    documentPath: string
+    config: NumberingConfig
+    overrides?: Record<string, HeadingNumberingOverride>
+  }): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.NUMBERING_SAVE, { documentPath, config, overrides }),
+
+  resetNumbering: (documentPath: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.NUMBERING_RESET, documentPath),
 
   saveWindowState: (state: WindowState): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SAVE_STATE, state),

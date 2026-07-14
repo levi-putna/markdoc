@@ -9,12 +9,15 @@ import {
 } from '@shared/markdown-gfm'
 import { buildOutlineFromDoc } from '@shared/document-index'
 import {
+  getHeadingMentionDisplayLabel,
   getHeadingMentionLabel,
   HEADING_DELETED_LABEL,
   listHeadingsForMention,
   resolveHeadingById,
   shouldOpenMentionPopupUpwards,
+  resolveMentionPopupHorizontalPlacement,
 } from '@shared/heading-mention-resolve'
+import { syncHeadingNumbersInEditor } from '@shared/heading-numbering-apply'
 import { prepareHtmlForExport, bookmarkIdForHeading } from '@shared/heading-mention-export'
 import { exportToDocx } from '@shared/export'
 
@@ -300,7 +303,7 @@ describe('TC-MENTION heading mentions', () => {
 
   it('TC-MENTION.12 prepares HTML export with id anchors and fragment links', () => {
     const html =
-      '<h2 data-heading-id="abc123">Intro</h2><p>See <a data-heading-mention data-heading-id="abc123" href="heading://abc123" class="heading-mention">@Intro</a></p>'
+      '<h2 data-heading-id="abc123">Intro</h2><p>See <a data-heading-mention data-heading-id="abc123" href="heading://abc123" class="heading-mention">Intro</a></p>'
     const prepared = prepareHtmlForExport({ html })
     expect(prepared).toContain('id="abc123"')
     expect(prepared).toContain('href="#abc123"')
@@ -334,6 +337,39 @@ describe('TC-MENTION heading mentions', () => {
     expect(shouldOpenMentionPopupUpwards({ caretTop: 399, viewportHeight: 800 })).toBe(false)
   })
 
+  it('TC-MENTION.17 flips the popup left when it would overflow the right edge', () => {
+    const menuWidth = 280
+    const viewport = 1000
+    const margin = 8
+
+    expect(
+      resolveMentionPopupHorizontalPlacement({
+        anchorLeft: 100,
+        popupWidth: menuWidth,
+        viewportWidth: viewport,
+        margin,
+      })
+    ).toEqual({ left: 100, flipLeft: false })
+
+    expect(
+      resolveMentionPopupHorizontalPlacement({
+        anchorLeft: 800,
+        popupWidth: menuWidth,
+        viewportWidth: viewport,
+        margin,
+      })
+    ).toEqual({ left: 800, flipLeft: true })
+
+    expect(
+      resolveMentionPopupHorizontalPlacement({
+        anchorLeft: 500,
+        popupWidth: viewport,
+        viewportWidth: viewport,
+        margin,
+      })
+    ).toEqual({ left: margin, flipLeft: false })
+  })
+
   it('loads the heading-mentions fixture with stable ids and mention nodes', () => {
     const source = readFileSync(join(fixturesDir, 'heading-mentions.md'), 'utf-8')
     expect(extractHeadingIdsFromMarkdown({ markdown: source })).toEqual([
@@ -356,5 +392,49 @@ describe('TC-MENTION heading mentions', () => {
 
   it('builds Word-safe bookmark ids', () => {
     expect(bookmarkIdForHeading({ headingId: 'abc-123' })).toBe('md_abc-123')
+  })
+
+  it('TC-MENTION.17 prefixes mention display labels with heading numbers when enabled', () => {
+    const editor = loadMarkdownIntoEditor('# Introduction\n\n## Scope\n')
+    let introId: string | null = null
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'heading' && node.textContent === 'Introduction') {
+        introId = node.attrs.headingId as string
+      }
+    })
+
+    syncHeadingNumbersInEditor({
+      editor,
+      config: { enabled: true, preset: 'decimal', displayMode: 'full', version: 1 },
+    })
+
+    expect(introId).toBeTruthy()
+    const withNumbers = getHeadingMentionDisplayLabel({
+      doc: editor.state.doc,
+      headingId: introId,
+      showNumbersInMentions: true,
+    })
+    expect(withNumbers.display).toBe('1 Introduction')
+
+    const withoutNumbers = getHeadingMentionDisplayLabel({
+      doc: editor.state.doc,
+      headingId: introId,
+      showNumbersInMentions: false,
+    })
+    expect(withoutNumbers.display).toBe('Introduction')
+    editor.destroy()
+  })
+
+  it('TC-MENTION.17 never prefixes broken mention labels with numbers', () => {
+    const editor = loadMarkdownIntoEditor('# Keep Me\n')
+    const broken = getHeadingMentionDisplayLabel({
+      doc: editor.state.doc,
+      headingId: 'missing-id',
+      cachedLabel: 'Deleted Heading',
+      showNumbersInMentions: true,
+    })
+    expect(broken.broken).toBe(true)
+    expect(broken.display).toBe('Deleted Heading')
+    editor.destroy()
   })
 })

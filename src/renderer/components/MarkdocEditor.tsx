@@ -23,12 +23,18 @@ import {
   buildAutocompleteEditorContext,
   normaliseAutocompleteSuggestion,
 } from '@shared/ai-autocomplete-context'
+import { computeHeadingNumbers } from '@shared/heading-numbering'
+import {
+  syncHeadingNumbersInEditor,
+  isHeadingNumberingTransaction,
+} from '@shared/heading-numbering-apply'
 import { useDocumentStore } from '../store/document-store'
 import { CodeBlockView } from './CodeBlockView'
 import { EditorToolbar } from './EditorToolbar'
 import { TableBubbleMenu } from './TableBubbleMenu'
 import { HeadingMentionView } from './HeadingMentionView'
 import { createHeadingMentionSuggestionRender } from '../utils/heading-mention-suggestion'
+import { setHeadingMentionNumberDisplay } from '@shared/extensions/heading-mention'
 
 interface MarkdocEditorProps {
   content: string
@@ -65,16 +71,25 @@ export function MarkdocEditor({
     documentTier,
     preferences,
     outline,
+    numberingConfig,
+    numberingOverrides,
+    setHeadingNumbers,
   } = useDocumentStore()
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const numberingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autocompleteRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autocompleteRequestId = useRef<string | null>(null)
   const scheduleAutocompleteRef = useRef<(ed: Editor) => void>(() => {})
   const isLocalUpdate = useRef(false)
+  const isNumberingSync = useRef(false)
   const rafRef = useRef<number | null>(null)
   const onHeadingClickRef = useRef(onHeadingClick)
   onHeadingClickRef.current = onHeadingClick
+  const numberingConfigRef = useRef(numberingConfig)
+  numberingConfigRef.current = numberingConfig
+  const numberingOverridesRef = useRef(numberingOverrides)
+  numberingOverridesRef.current = numberingOverrides
 
   const editor = useEditor({
     extensions: [...createTiptapExtensions({
@@ -118,14 +133,79 @@ export function MarkdocEditor({
         return true
       },
     },
-    onUpdate: ({ editor: ed }) => {
+    onUpdate: ({ editor: ed, transaction }) => {
       isLocalUpdate.current = true
+
+      // Avoid re-entrant work when we just applied numbering ourselves
+      if (isHeadingNumberingTransaction(transaction) || isNumberingSync.current) {
+        const markdown = getMarkdownFromEditor(ed)
+        const { outline: nextOutline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
+          syncDocumentIndexFromEditor({ editor: ed })
+
+        if (numberingConfigRef.current.enabled) {
+          const numberMap = computeHeadingNumbers({
+            outline: nextOutline,
+            config: numberingConfigRef.current,
+            overridesByHeadingId: numberingOverridesRef.current,
+          })
+          const labels: Record<string, string> = {}
+          for (const [id, result] of numberMap) {
+            labels[id] = result.displayLabel
+          }
+          setHeadingNumbers(labels)
+        } else {
+          setHeadingNumbers({})
+        }
+
+        setMarkdown(markdown)
+        setOutline(nextOutline)
+        setWordCount(wordCount)
+        setCharCount(charCount)
+        setReadingTimeMinutes(readingTimeMinutes)
+        setDocumentTier(tier)
+        return
+      }
+
       const markdown = getMarkdownFromEditor(ed)
-      const { outline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
+      const { outline: nextOutline, wordCount, documentTier: tier, charCount, readingTimeMinutes } =
         syncDocumentIndexFromEditor({ editor: ed })
 
+      if (numberingConfigRef.current.enabled) {
+        const numberMap = computeHeadingNumbers({
+          outline: nextOutline,
+          config: numberingConfigRef.current,
+          overridesByHeadingId: numberingOverridesRef.current,
+        })
+        const labels: Record<string, string> = {}
+        for (const [id, result] of numberMap) {
+          labels[id] = result.displayLabel
+        }
+        setHeadingNumbers(labels)
+
+        // Debounced re-apply so new/moved/edited headings stay numbered
+        if (numberingDebounceRef.current) clearTimeout(numberingDebounceRef.current)
+        numberingDebounceRef.current = setTimeout(() => {
+          if (!ed.isDestroyed && numberingConfigRef.current.enabled) {
+            isNumberingSync.current = true
+            try {
+              syncHeadingNumbersInEditor({
+                editor: ed,
+                config: numberingConfigRef.current,
+                overrides: numberingOverridesRef.current,
+              })
+            } finally {
+              queueMicrotask(() => {
+                isNumberingSync.current = false
+              })
+            }
+          }
+        }, 200)
+      } else {
+        setHeadingNumbers({})
+      }
+
       setMarkdown(markdown)
-      setOutline(outline)
+      setOutline(nextOutline)
       setWordCount(wordCount)
       setCharCount(charCount)
       setReadingTimeMinutes(readingTimeMinutes)
@@ -172,6 +252,14 @@ export function MarkdocEditor({
       editor.view.dom.removeEventListener('markdoc-heading-mention', onMentionNavigate)
     }
   }, [editor])
+
+  // Keep mention HTML/export in sync with the document numbering display setting.
+  useEffect(() => {
+    if (!editor) return
+    const showNumbers =
+      numberingConfig.enabled && (numberingConfig.showNumbersInMentions ?? true)
+    setHeadingMentionNumberDisplay({ editor, showNumbersInMentions: showNumbers })
+  }, [editor, numberingConfig.enabled, numberingConfig.showNumbersInMentions])
 
   // Apply external markdown changes (file load, markdown tab, outline reorder)
   useEffect(() => {

@@ -139,6 +139,41 @@ export function moveSectionInEditor({
 }
 
 /**
+ * Indents or outdents a heading section by shifting all heading levels in its
+ * range by `delta` (±1). Indent nests under the sibling above; outdent promotes
+ * to a peer of the current parent. Document order is unchanged.
+ */
+export function shiftSectionNestingInEditor({
+  editor,
+  item,
+  delta,
+}: {
+  editor: Editor
+  item: Pick<FlatOutlineItem, 'pos' | 'sectionEnd' | 'level'>
+  delta: 1 | -1
+}): boolean {
+  if (delta !== 1 && delta !== -1) return false
+
+  const updates = shiftHeadingLevelsInRange({
+    doc: editor.state.doc,
+    from: item.pos,
+    to: item.sectionEnd,
+    delta,
+  })
+  if (updates.length === 0) return false
+
+  const { tr } = editor.state
+  for (const { pos, level } of [...updates].reverse()) {
+    const node = tr.doc.nodeAt(pos)
+    if (node?.type.name === 'heading') {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, level })
+    }
+  }
+  editor.view.dispatch(tr)
+  return true
+}
+
+/**
  * Returns the heading level implied by a projected tree depth.
  */
 export function headingLevelForDepth(depth: number): number {

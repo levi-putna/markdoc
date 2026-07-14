@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { parseMarkdownFile, serializeMarkdownFile, getAssetFolderPath, getStyleSidecarPath } from '@shared/file-utils'
+import {
+  parseMarkdownFile,
+  serializeMarkdownFile,
+  getAssetFolderPath,
+  getStyleSidecarPath,
+  getNumberingSidecarPath,
+} from '@shared/file-utils'
 import { buildOutlineFromDoc, flattenOutline, countWords } from '@shared/document-index'
 import { getDocumentSizeTier, getDebounceMs } from '@shared/types'
 import { markdownRoundTrip, loadMarkdownIntoEditor, getMarkdownFromEditor } from '@shared/markdown'
@@ -24,6 +30,12 @@ describe('file-utils', () => {
 
   it('returns style sidecar path', () => {
     expect(getStyleSidecarPath('/path/to/notes.md')).toBe('/path/to/notes.markdoc-style.json')
+  })
+
+  it('TC-NUMBER.9 returns numbering sidecar path', () => {
+    expect(getNumberingSidecarPath('/path/to/notes.md')).toBe(
+      '/path/to/notes.markdoc-numbering.json'
+    )
   })
 })
 
