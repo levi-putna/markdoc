@@ -12,6 +12,20 @@ export interface ResolvedHeading {
 export const HEADING_DELETED_LABEL = 'Heading deleted'
 
 /**
+ * Returns whether the mention popup should open above the caret
+ * (bottom half of the viewport) or below it (top half).
+ */
+export function shouldOpenMentionPopupUpwards({
+  caretTop,
+  viewportHeight,
+}: {
+  caretTop: number
+  viewportHeight: number
+}): boolean {
+  return caretTop >= viewportHeight / 2
+}
+
+/**
  * Builds a map of headingId → heading metadata from a ProseMirror document.
  */
 export function buildHeadingLookup({
@@ -53,17 +67,22 @@ export function resolveHeadingById({
 
 /**
  * Returns the display label for a heading mention (with leading @ omitted).
+ * When the target heading is gone, keeps the last-known `cachedLabel` so the
+ * chip still shows what was deleted (styled red by the UI).
  */
 export function getHeadingMentionLabel({
   doc,
   headingId,
+  cachedLabel = null,
 }: {
   doc: ProseMirrorNode
   headingId: string | null | undefined
+  cachedLabel?: string | null
 }): { label: string; broken: boolean } {
   const resolved = resolveHeadingById({ doc, headingId })
   if (!resolved) {
-    return { label: HEADING_DELETED_LABEL, broken: true }
+    const fallback = cachedLabel?.trim() || HEADING_DELETED_LABEL
+    return { label: fallback, broken: true }
   }
   return { label: resolved.text, broken: false }
 }

@@ -70,7 +70,7 @@ Primary goals: catch regressions in Markdown round-trip fidelity (the riskiest a
 
 | ID | Requirement |
 |----|-------------|
-| QR-7.1 | A fixtures directory must contain: (a) a document exercising every GFM construct in `functional-requirements.md` Section 8, individually and in combination; (b) documents with valid and deliberately invalid Mermaid diagrams; (c) documents with front matter, with and without body content; (d) documents referencing images via relative paths, including at least one intentionally broken reference; (e) a document with a style-override sidecar file applied. |
+| QR-7.1 | A fixtures directory must contain: (a) a document exercising every GFM construct in `functional-requirements.md` Section 8, individually and in combination; (b) documents with valid and deliberately invalid Mermaid diagrams; (c) documents with front matter, with and without body content; (d) documents referencing images via relative paths, including at least one intentionally broken reference; (e) a document with a style-override sidecar file applied; (f) a document with heading mentions (`[@…](heading://…)`) and ATX headings carrying `{#id}` suffixes for MarkDoc-specific round-trip tests. |
 | QR-7.2 | Where practical, the CommonMark spec's official test suite (or a representative subset) should be used to validate baseline Markdown parsing/serialization fidelity, supplementing MarkDoc-specific fixtures. |
 | QR-7.3 | Fixtures must be treated as test code: reviewed in PRs, and updated deliberately (not silently) when intentional behavior changes require updating an expected snapshot. |
 | QR-7.4 | AI fixtures must include: (a) serialised `UIMessage[]` conversation threads for per-document history tests; (b) mocked gateway stream chunks (text, tool-call, tool-result, error) for assistant UI tests; (c) mock gateway error payloads for insufficient credit (402/403), invalid key (401), rate limit (429), and timeout; (d) a short document with duplicate heading titles for heading-reference collision tests. |
@@ -239,6 +239,31 @@ Each row is a representative test case; area codes map to `functional-requiremen
 | TC-EXPORT.5 | Export of a document with an unsupported/failing construct surfaces a clear error rather than producing a silently truncated or corrupted file. | Integration |
 | TC-EXPORT.6 | Export respects applied style overrides (cross-referenced with `TC-STYLE.5`). | Integration |
 | TC-EXPORT.7 | Exporting a fixture document to standalone HTML produces a file that renders correctly (styles and diagram SVGs intact) when opened directly in a browser, independent of MarkDoc. | Integration |
+| TC-EXPORT.8 | A document containing heading mentions exports HTML/PDF with `#headingId` fragment links and matching heading `id` attributes (FR-11.8). | Unit + Integration |
+| TC-EXPORT.9 | A document containing heading mentions exports DOCX without dropping the mention text; resolved mentions become internal hyperlinks where bookmarks exist (FR-11.8 / TR-10.7). | Unit |
+
+**Heading Mentions (`TC-MENTION`) — verifies FR-2.13–FR-2.15, FR-7.13, TR-8.13–TR-8.16**
+
+| ID | Test Case | Level |
+|----|-----------|-------|
+| TC-MENTION.1 | Loading a document assigns a persistent `headingId` to each heading that lacks one; ids are unique within the document. | Unit |
+| TC-MENTION.2 | The outline uses each heading's stored `headingId` as its node id when present. | Unit |
+| TC-MENTION.3 | Renaming a heading's text does not change its `headingId`. | Unit |
+| TC-MENTION.4 | Inserting content above a heading (position shift) does not change its `headingId` (live-document stability). | Unit |
+| TC-MENTION.5 | `[@Label](heading://id)` round-trips through GFM preprocess/postprocess without losing the heading id. | Unit |
+| TC-MENTION.6 | Inserting a `headingMention` into the editor serializes to `[@Title](heading://id)` and reloads as a mention node with the same `headingId`. | Unit |
+| TC-MENTION.7 | After renaming the target heading, resolving the mention returns the new title and is not broken. | Unit |
+| TC-MENTION.8 | After deleting the target heading, resolving the mention is broken (red) and still shows the previous heading title. | Unit |
+| TC-MENTION.8a | Clicking a broken mention opens the heading suggestion list; selecting a heading updates the mention's `headingId`/`label` and clears the broken state. | Unit + Integration |
+
+| TC-MENTION.9 | After moving a heading elsewhere in the document, a mention of that heading still resolves to the same title/`headingId`. | Unit |
+| TC-MENTION.10 | The suggestion item list returns all document headings and filters by query substring. | Unit |
+| TC-MENTION.11 | Headings with an explicit `{#id}` suffix keep that id across a full markdown round-trip. | Unit |
+| TC-MENTION.12 | HTML export preparation rewrites `heading://` mention hrefs to `#id` and adds matching heading `id` attributes. | Unit |
+| TC-MENTION.13 | DOCX export of a document that contains heading mentions succeeds without unsupported-block warnings for the mention nodes. | Unit |
+| TC-MENTION.14 | Typing `@` (or using the toolbar Mention control) opens the heading suggestion popup; selecting an item inserts a mention of that heading. | Component / Integration |
+| TC-MENTION.15 | Clicking a non-broken mention in the editor jumps to the heading via the same path as outline click (FR-2.15); it must not trigger an OS "open URL" dialog for `heading://`. | Integration |
+| TC-MENTION.16 | The suggestion popup opens downward when the caret is in the top half of the viewport and upward when in the bottom half. | Component |
 
 **Preferences (`TC-PREFS`) — verifies FR-13.x**
 
@@ -307,7 +332,7 @@ Each row is a representative test case; area codes map to `functional-requiremen
 
 ### 3.4 Regression / Smoke Suite (Per-PR Gate)
 
-A fast subset (~15–20 test cases, target under 5 minutes total) must run on every PR, covering at minimum: TC-EDIT.1–2, TC-PREVIEW.1, TC-OUTLINE.3, TC-OUTLINE.6, TC-OUTLINE.9, TC-HEADER.2–3, TC-SEARCH.1–2, TC-FILE.1–2, TC-FILE.7, TC-FILE.9, TC-CLI.2, TC-MD.1–2 (subset), TC-DIAG.1–2, TC-STYLE.1, TC-IMG.1, TC-EXPORT.1–2, TC-PERF.2, **TC-AI.1, TC-AI.6–7, TC-AI.9, TC-AI.13, TC-AIA.1–2**. The full suite in Section 3.3 runs pre-release and on main-branch merges (QR-6.1/QR-6.2); the nightly-only performance cases (TC-PERF.1, .3, .5, .7 — QR-4.1) run on their own schedule rather than gating every PR.
+A fast subset (~15–20 test cases, target under 5 minutes total) must run on every PR, covering at minimum: TC-EDIT.1–2, TC-PREVIEW.1, TC-OUTLINE.3, TC-OUTLINE.6, TC-OUTLINE.9, TC-HEADER.2–3, TC-SEARCH.1–2, TC-FILE.1–2, TC-FILE.7, TC-FILE.9, TC-CLI.2, TC-MD.1–2 (subset), TC-DIAG.1–2, TC-STYLE.1, TC-IMG.1, TC-EXPORT.1–2, TC-PERF.2, **TC-MENTION.1, TC-MENTION.6–8, TC-MENTION.12**, **TC-AI.1, TC-AI.6–7, TC-AI.9, TC-AI.13, TC-AIA.1–2**. The full suite in Section 3.3 runs pre-release and on main-branch merges (QR-6.1/QR-6.2); the nightly-only performance cases (TC-PERF.1, .3, .5, .7 — QR-4.1) run on their own schedule rather than gating every PR.
 
 ### 3.5 Manual QA Checklist (Pre-Release)
 
@@ -326,6 +351,7 @@ Items that are impractical or low-value to fully automate, to be walked through 
 - Auto-update dry run (TC-UPDATE.7): install the previous release, publish the new one via `yarn release`, and confirm the running app finds it, downloads it in the background, and successfully restarts into the new version. Also confirm that starting the restart prompt while a document has unsaved changes does *not* offer to install until the document is saved or closed.
 - **AI manual smoke (optional, requires user's gateway key):** enable AI, send a summarise prompt, verify streaming response, verify Suggestion-mode edit accept/reject on a short fixture document, verify conversation persists after close/reopen of the same file.
 - Visual inspection of one exported PDF and one exported DOCX file opened in Preview.app and Microsoft Word/Pages respectively, confirming they look correct to a human, not just structurally correct to an automated parser.
+- **Heading mentions:** type `@` (and use the toolbar Mention button) to insert a mention; rename/move/delete the target heading and confirm live label / broken-state behaviour; click a mention and confirm it jumps like the outline without an OS URL dialog; confirm the suggestion popup flips above the caret near the bottom of the viewport.
 
 ### 3.6 Release Exit Criteria
 

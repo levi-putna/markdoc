@@ -67,7 +67,7 @@ Text b.
     expect(flat[1].level).toBe(3)
   })
 
-  it('TC-OUTLINE.10 keeps heading ids stable when content is inserted above', () => {
+  it('TC-MENTION.4 keeps heading ids stable when content is inserted above', () => {
     const editor = loadMarkdownIntoEditor('# Hello\n\n## World')
     const idBefore = buildOutlineFromDoc(editor.state.doc)[0].id
 

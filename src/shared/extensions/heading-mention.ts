@@ -1,8 +1,10 @@
 import { mergeAttributes, type Editor } from '@tiptap/core'
 import Mention from '@tiptap/extension-mention'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { SuggestionOptions } from '@tiptap/suggestion'
 import {
+  buildHeadingLookup,
   getHeadingMentionLabel,
   listHeadingsForMention,
   type ResolvedHeading,
@@ -10,11 +12,23 @@ import {
 
 export type HeadingMentionItem = ResolvedHeading
 
+const headingMentionLabelKey = new PluginKey('headingMentionLabelSync')
+
 /**
  * Escapes markdown link text so labels with brackets don't break the mention syntax.
  */
 function escapeMarkdownLinkLabel({ text }: { text: string }): string {
   return text.replace(/[[\]]/g, '\\$&')
+}
+
+/**
+ * Reads the display label from a mention HTML element (strip leading @).
+ */
+function labelFromElement({ element }: { element: HTMLElement }): string | null {
+  const dataLabel = element.getAttribute('data-label')
+  if (dataLabel?.trim()) return dataLabel.trim()
+  const text = element.textContent?.replace(/^@/, '').trim()
+  return text || null
 }
 
 /**
@@ -48,7 +62,11 @@ export function createHeadingMentionSuggestion({
         .insertContentAt(range, [
           {
             type: 'headingMention',
-            attrs: { headingId },
+            attrs: {
+              headingId,
+              // Cache the title at insert time so a later delete can still show it.
+              label: props.text ?? props.label ?? null,
+            },
           },
           { type: 'text', text: ' ' },
         ])
@@ -62,6 +80,7 @@ export function createHeadingMentionSuggestion({
 
 /**
  * Inline atom node for @heading mentions — links to a stable headingId.
+ * Stores a cached `label` of the last known heading title for broken-state display.
  */
 export const HeadingMention = Mention.extend({
   name: 'headingMention',
@@ -77,6 +96,14 @@ export const HeadingMention = Mention.extend({
           return { 'data-heading-id': attributes.headingId }
         },
       },
+      label: {
+        default: null,
+        parseHTML: (element) => labelFromElement({ element: element as HTMLElement }),
+        renderHTML: (attributes) => {
+          if (!attributes.label) return {}
+          return { 'data-label': attributes.label }
+        },
+      },
     }
   },
 
@@ -86,9 +113,11 @@ export const HeadingMention = Mention.extend({
       {
         tag: 'a[href^="heading://"]',
         getAttrs: (element) => {
-          const href = (element as HTMLElement).getAttribute('href') ?? ''
+          const el = element as HTMLElement
+          const href = el.getAttribute('href') ?? ''
           const headingId = href.replace(/^heading:\/\//, '')
-          return headingId ? { headingId } : false
+          if (!headingId) return false
+          return { headingId, label: labelFromElement({ element: el }) }
         },
       },
     ]
@@ -96,9 +125,11 @@ export const HeadingMention = Mention.extend({
 
   renderHTML({ node, HTMLAttributes }) {
     const headingId = node.attrs.headingId as string
+    const cachedLabel = node.attrs.label as string | null
     const { label, broken } = getHeadingMentionLabel({
       doc: this.editor!.state.doc,
       headingId,
+      cachedLabel,
     })
 
     return [
@@ -106,6 +137,7 @@ export const HeadingMention = Mention.extend({
       mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
         'data-heading-mention': '',
         'data-heading-id': headingId,
+        'data-label': label,
         'data-broken': broken ? 'true' : null,
         href: `heading://${headingId}`,
         class: broken ? 'heading-mention heading-mention--broken' : 'heading-mention',
@@ -118,6 +150,7 @@ export const HeadingMention = Mention.extend({
     const { label } = getHeadingMentionLabel({
       doc: this.editor!.state.doc,
       headingId: node.attrs.headingId,
+      cachedLabel: node.attrs.label,
     })
     return `@${label}`
   },
@@ -130,12 +163,47 @@ export const HeadingMention = Mention.extend({
           const { label } = getHeadingMentionLabel({
             doc: this.editor.state.doc,
             headingId,
+            cachedLabel: node.attrs.label,
           })
           state.write(`[@${escapeMarkdownLinkLabel({ text: label })}](heading://${headingId})`)
         },
         parse: {},
       },
     }
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      ...(this.parent?.() ?? []),
+      new Plugin({
+        key: headingMentionLabelKey,
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some((transaction) => transaction.docChanged)) return null
+
+          const lookup = buildHeadingLookup({ doc: newState.doc })
+          let transaction = newState.tr
+          let changed = false
+
+          newState.doc.descendants((node, pos) => {
+            if (node.type.name !== 'headingMention') return
+            const headingId = node.attrs.headingId as string | null
+            if (!headingId) return
+            const resolved = lookup.get(headingId)
+            // Only refresh the cached label while the heading still exists —
+            // on delete we keep the previous title for the broken (red) chip.
+            if (!resolved) return
+            if (node.attrs.label === resolved.text) return
+            transaction = transaction.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              label: resolved.text,
+            })
+            changed = true
+          })
+
+          return changed ? transaction : null
+        },
+      }),
+    ]
   },
 })
 

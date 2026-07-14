@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react'
 import type { ResolvedHeading } from '@shared/heading-mention-resolve'
 
+export interface HeadingMentionPickPayload {
+  headingId: string
+  label: string
+}
+
 export interface HeadingMentionListProps {
   items: ResolvedHeading[]
-  command: (item: { headingId: string }) => void
+  command: (item: HeadingMentionPickPayload) => void
 }
 
 export interface HeadingMentionListRef {
@@ -11,7 +16,7 @@ export interface HeadingMentionListRef {
 }
 
 /**
- * Suggestion popup listing document headings for `@` mentions.
+ * Suggestion popup listing document headings for `@` mentions and broken-mention relinks.
  */
 export const HeadingMentionList = forwardRef<HeadingMentionListRef, HeadingMentionListProps>(
   function HeadingMentionList({ items, command }, ref) {
@@ -25,7 +30,7 @@ export const HeadingMentionList = forwardRef<HeadingMentionListRef, HeadingMenti
       (index: number) => {
         const item = items[index]
         if (!item) return
-        command({ headingId: item.headingId })
+        command({ headingId: item.headingId, label: item.text })
       },
       [command, items]
     )
@@ -51,6 +56,7 @@ export const HeadingMentionList = forwardRef<HeadingMentionListRef, HeadingMenti
     if (items.length === 0) {
       return (
         <div className="heading-mention-list" data-testid="heading-mention-list">
+          {/* Empty state when the document has no headings to mention */}
           <p className="heading-mention-list__empty">No headings found</p>
         </div>
       )

@@ -1327,7 +1327,7 @@ textarea {
 .preview-content .heading-mention--broken {
   color: #dc2626;
   background: color-mix(in srgb, #dc2626 10%, transparent);
-  cursor: default;
+  cursor: pointer;
 }
 
 .heading-mention-popup {

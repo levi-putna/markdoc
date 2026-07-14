@@ -5,45 +5,57 @@ import {
   type HeadingMentionListRef,
 } from '../components/HeadingMentionList'
 import type { HeadingMentionItem } from '@shared/extensions/heading-mention'
+import { shouldOpenMentionPopupUpwards } from '@shared/heading-mention-resolve'
 
 /**
- * Creates TipTap suggestion render hooks that mount the heading mention popup.
+ * Positions the live `@` suggestion popup; shared geometry with the relink picker.
+ */
+function positionSuggestionPopup({
+  popup,
+  clientRect,
+}: {
+  popup: HTMLDivElement
+  clientRect?: (() => DOMRect | null) | null
+}): void {
+  if (!clientRect) return
+  const rect = clientRect()
+  if (!rect) return
+
+  const gap = 4
+  const openUpwards = shouldOpenMentionPopupUpwards({
+    caretTop: rect.top,
+    viewportHeight: window.innerHeight,
+  })
+
+  popup.style.left = `${Math.round(rect.left + window.scrollX)}px`
+
+  if (openUpwards) {
+    popup.style.top = `${Math.round(rect.top + window.scrollY - gap)}px`
+    popup.style.transform = 'translateY(-100%)'
+  } else {
+    popup.style.top = `${Math.round(rect.bottom + window.scrollY + gap)}px`
+    popup.style.transform = ''
+  }
+}
+
+/**
+ * Creates TipTap suggestion render hooks that mount the heading mention popup
+ * while typing `@`. Broken-mention relinking uses the separate picker utility.
  */
 export function createHeadingMentionSuggestionRender() {
   let component: ReactRenderer<HeadingMentionListRef> | null = null
   let popup: HTMLDivElement | null = null
-
-  /**
-   * Positions the popup below the caret in the top half of the viewport,
-   * and above it in the bottom half so the list stays on screen.
-   */
-  const updatePosition = ({ clientRect }: { clientRect?: (() => DOMRect | null) | null }) => {
-    if (!popup || !clientRect) return
-    const rect = clientRect()
-    if (!rect) return
-
-    const gap = 4
-    const openUpwards = rect.top >= window.innerHeight / 2
-
-    popup.style.left = `${Math.round(rect.left + window.scrollX)}px`
-
-    if (openUpwards) {
-      // Place the bottom edge of the popup just above the caret.
-      popup.style.top = `${Math.round(rect.top + window.scrollY - gap)}px`
-      popup.style.transform = 'translateY(-100%)'
-    } else {
-      popup.style.top = `${Math.round(rect.bottom + window.scrollY + gap)}px`
-      popup.style.transform = ''
-    }
-  }
 
   return {
     onStart: (props: SuggestionProps<HeadingMentionItem>) => {
       component = new ReactRenderer(HeadingMentionList, {
         props: {
           items: props.items,
-          command: (item: { headingId: string }) => {
-            props.command(item as HeadingMentionItem)
+          command: (pick: { headingId: string; label: string }) => {
+            props.command({
+              headingId: pick.headingId,
+              text: pick.label,
+            } as HeadingMentionItem)
           },
         },
         editor: props.editor,
@@ -53,17 +65,20 @@ export function createHeadingMentionSuggestionRender() {
       popup.className = 'heading-mention-popup'
       popup.appendChild(component.element)
       document.body.appendChild(popup)
-      updatePosition({ clientRect: props.clientRect })
+      positionSuggestionPopup({ popup, clientRect: props.clientRect })
     },
 
     onUpdate: (props: SuggestionProps<HeadingMentionItem>) => {
       component?.updateProps({
         items: props.items,
-        command: (item: { headingId: string }) => {
-          props.command(item as HeadingMentionItem)
+        command: (pick: { headingId: string; label: string }) => {
+          props.command({
+            headingId: pick.headingId,
+            text: pick.label,
+          } as HeadingMentionItem)
         },
       })
-      updatePosition({ clientRect: props.clientRect })
+      if (popup) positionSuggestionPopup({ popup, clientRect: props.clientRect })
     },
 
     onKeyDown: (props: SuggestionKeyDownProps) => {

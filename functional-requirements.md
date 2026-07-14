@@ -35,14 +35,16 @@ MarkDoc's editing surface is built on [Tiptap](https://tiptap.dev/) (ProseMirror
 | FR-2.3 | Typing recognized Markdown shorthand (e.g. `## `, `- `, `1. `, `> `, `` ``` ``) must trigger live "input rules" that convert the shorthand into the corresponding rich node, matching familiar WYSIWYG-Markdown behavior (as in Notion, Bear, Typora). |
 | FR-2.4 | The editor must support standard text editing conventions: undo/redo, cut/copy/paste (including pasting Markdown or rich text from other apps and converting it to MarkDoc's model), find & replace, and select all. |
 | FR-2.5 | The editor must support common list authoring affordances: auto-continuation of ordered/unordered/task lists on Enter, smart indent/outdent (Tab/Shift-Tab), and exiting a list via double-Enter or Backspace at an empty item. |
-| FR-2.6 | The editor must support keyboard shortcuts and a formatting toolbar/bubble menu for common actions (bold, italic, strikethrough, inline code, links, heading level, blockquote, lists, code block, tables). |
-| FR-2.7 | On save, the editor's document model must serialize back to clean Markdown consistent with the elements defined in Section 8 (GFM), without introducing extraneous HTML or lossy conversions, so files remain portable and readable in any other Markdown tool. |
+| FR-2.6 | The editor must support keyboard shortcuts and a formatting toolbar/bubble menu for common actions (bold, italic, strikethrough, inline code, links, heading level, blockquote, lists, code block, tables, **heading mentions**). |
+| FR-2.7 | On save, the editor's document model must serialize back to clean Markdown consistent with the elements defined in Section 8 (GFM), without introducing extraneous HTML or lossy conversions, so files remain portable and readable in any other Markdown tool. MarkDoc-specific extensions (footnotes, definition lists, heading mentions) must round-trip via documented syntax rather than opaque proprietary blobs. |
 | FR-2.8 | The editor must support a word count / character count / reading-time indicator. |
 | FR-2.9 | The editor must support adjustable font family, font size, and line spacing for the editing surface, persisted as a user preference. |
 | FR-2.10 | The app should offer an optional "View Source" mode that displays the raw Markdown text for the current document (read-only or editable) for power users, distinct from the default WYSIWYG editing mode. |
 | FR-2.11 | The editor must support native macOS spellcheck (red squiggly underline, right-click suggestions) and standard macOS text substitutions (smart quotes, dashes, auto-correction) via Chromium's built-in spellchecker and the system dictionary, matching the behavior users expect from any native Mac text-editing surface. This can be toggled off in Preferences (Section 14). |
 | FR-2.12 | MarkDoc must handle very large Markdown documents without freezing, crashing, or becoming unusable. Concretely: full-fidelity live behavior (diagram auto-render, syntax-reveal, live outline/search) for documents up to 10,000 words / ~2MB; beyond that, an automatic "Large Document Mode" trades some live-feature freshness for typing responsiveness, with a visible (non-blocking) indicator so the user understands why; documents beyond ~100,000 words / 20MB must still open, edit, and save successfully, without a commitment to feel as snappy as smaller documents. See `technical-requirements.md` Section 13 for the concrete size tiers and rendering strategy. |
-
+| FR-2.13 | The user must be able to insert an **inline heading mention** by typing `@` in the editor (or via a dedicated toolbar button), which opens a filtered suggestion list of the document's headings. Selecting a heading inserts a mention chip that displays that heading's current title. |
+| FR-2.14 | Heading mentions must stay linked by a **stable heading identity**, not by display text alone: renaming a heading updates every mention's visible label; moving or re-nesting a heading keeps mentions resolving; deleting a heading turns its mentions red while **keeping the last known heading title** visible (so the user can still tell what was deleted). Clicking a broken mention must reopen the heading suggestion list so the user can **relink** it to another available heading without deleting and re-inserting the chip. |
+| FR-2.15 | Clicking a heading mention (that is not broken) must scroll/jump the editor (and preview, if visible) to the referenced heading using the **same navigation path as clicking an outline node** (FR-4.2) — never by opening an external `heading://` URL in the OS. |
 ---
 
 ## 4. Preview
@@ -134,6 +136,7 @@ The editor and preview must support the CommonMark spec plus the following GitHu
 | FR-7.10 | Definition lists. |
 | FR-7.11 | HTML passthrough for common inline/block HTML embedded in Markdown, rendered safely in preview. |
 | FR-7.12 | Front matter (YAML) at the top of the document, parsed and made available to the app (e.g. for title, tags, custom metadata) without breaking rendering. |
+| FR-7.13 | **Heading mentions** (MarkDoc-specific, not native GFM): inline mentions of headings must persist in the `.md` file as Markdown links of the form `[@Heading Title](heading://<headingId>)`. Headings must carry a stable id in source as a Pandoc-style ATX suffix (`## Title {#headingId}`) so mentions survive save/reload. Other Markdown editors may treat these as ordinary links; MarkDoc alone interprets `heading://` as an in-document heading reference. |
 
 ---
 
@@ -186,6 +189,7 @@ The editor and preview must support the CommonMark spec plus the following GitHu
 | FR-11.5 | Mermaid diagrams and charts must be rasterized/vectorized into the exported PDF/Word file, since target formats do not execute JavaScript. |
 | FR-11.6 | Export failures (e.g. unsupported construct) must produce a clear error/warning rather than a silently corrupted file. |
 | FR-11.7 | The user must be able to export the current document as standalone HTML (self-contained, with styles inlined or embedded so it renders correctly outside MarkDoc), reusing the same styled rendering pipeline as PDF/Preview at negligible extra implementation cost. |
+| FR-11.8 | Heading mentions (FR-2.13–FR-2.15 / FR-7.13) must survive export: HTML and PDF output must turn mentions into ordinary fragment links (`#headingId`) targeting heading elements that expose matching `id` attributes; DOCX export must preserve mentions as internal hyperlinks (or clearly degraded styled text with a warning if a bookmark cannot be created), not drop them silently. |
 
 ---
 

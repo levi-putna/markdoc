@@ -284,10 +284,16 @@ function convertInline({
     if (node.type === 'headingMention') {
       const headingId = typeof node.attrs?.headingId === 'string' ? node.attrs.headingId : null
       if (!headingId) continue
-      const label = headingLookup.get(headingId)
-      const text = label ? `@${label}` : `@${HEADING_DELETED_LABEL}`
+      const liveLabel = headingLookup.get(headingId)
+      const cachedLabel =
+        typeof node.attrs?.label === 'string' && node.attrs.label.trim()
+          ? node.attrs.label.trim()
+          : null
+      const text = liveLabel
+        ? `@${liveLabel}`
+        : `@${cachedLabel ?? HEADING_DELETED_LABEL}`
 
-      if (label) {
+      if (liveLabel) {
         runs.push(
           new InternalHyperlink({
             anchor: bookmarkIdForHeading({ headingId }),
