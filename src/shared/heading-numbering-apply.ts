@@ -165,7 +165,7 @@ export function syncHeadingNumbersInEditor({
 
     if (currentLabel === nextLabel && !migrationText) return
 
-    const attrs = { ...node.attrs, headingNumberLabel: nextLabel }
+    const attrs: Record<string, unknown> = { ...node.attrs, headingNumberLabel: nextLabel }
     // Drop deprecated headingTitle — it caused titles to be overwritten on sync.
     delete attrs.headingTitle
 
@@ -206,7 +206,7 @@ export function clearHeadingNumbersInEditor({ editor }: { editor: Editor }): boo
     const hasLegacyTitle = Boolean(node.attrs.headingTitle)
     if (!currentLabel && !migrationText && !hasLegacyTitle) return
 
-    const attrs = { ...node.attrs, headingNumberLabel: null }
+    const attrs: Record<string, unknown> = { ...node.attrs, headingNumberLabel: null }
     delete attrs.headingTitle
 
     updates.push({

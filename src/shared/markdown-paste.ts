@@ -34,7 +34,8 @@ export const MarkdownPaste = Extension.create({
       new Plugin({
         key: markdownPasteKey,
         props: {
-          clipboardTextParser: (text, context, plainText) => {
+          // Runtime: null falls through to the default text parser. Types require Slice.
+          clipboardTextParser: ((text, context, plainText) => {
             if (plainText || !this.options.enabled) {
               return null
             }
@@ -52,7 +53,7 @@ export const MarkdownPaste = Extension.create({
                 context,
               }
             )
-          },
+          }) as NonNullable<Plugin['props']>['clipboardTextParser'],
         },
       }),
     ]
